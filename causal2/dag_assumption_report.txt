@@ -1,0 +1,42 @@
+Finance DAG Assumption Report
+============================
+
+Variables:
+  - FedRate
+  - GDP
+  - CPI
+  - UNRATE
+  - SP500
+  - MarketSentiment
+
+Forced Edges (Domain Knowledge):
+  - FedRate -> CPI
+  - FedRate -> GDP
+  - GDP -> SP500
+  - CPI -> SP500
+  - UNRATE -> SP500
+  - MarketSentiment -> SP500
+
+Forbidden Edges (Domain Knowledge):
+  - SP500 -/-> FedRate
+  - SP500 -/-> GDP
+  - SP500 -/-> CPI
+  - SP500 -/-> UNRATE
+
+DAG Edges:
+  - FedRate -> CPI
+  - FedRate -> GDP
+  - GDP -> SP500
+  - CPI -> SP500
+  - UNRATE -> SP500
+  - MarketSentiment -> SP500
+
+Assumptions:
+  - The DAG encodes only theoretically justified relationships.
+  - Latent variables (e.g., MarketSentiment) are included as nodes but not observed in data.
+  - No reverse causality from SP500 to macro variables.
+
+Review required by finance SME for:
+  - Completeness of variables
+  - Validity of forced/forbidden edges
+  - Appropriateness of latent variable handling
