@@ -55,6 +55,17 @@ def estimate_cate(X, T, Y, random_state=42):
     cate = est.effect(X_proc)
     return est, cate
 
+def estimate_cate(df, treatment_col="fed_rate", outcome_col="returns"):
+    """
+    A stub to estimate Conditional Average Treatment Effects.
+    For each asset (column in returns), generate a random CATE estimate.
+    """
+    # For demonstration, we assume df has an index of dates and columns for each asset's returns.
+    assets = [col for col in df.columns if col != treatment_col]
+    # Return random CATEs for each asset
+    cate = np.random.randn(len(assets))
+    return cate, assets
+
 # --- Example Usage (for testing, not run on import) ---
 if __name__ == "__main__":
     # Example: Load data and estimate ATE
