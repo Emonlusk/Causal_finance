@@ -1,19 +1,22 @@
 from fastapi import FastAPI, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 import pandas as pd
-import numpy as np
-from typing import List, Dict
 import sys
 import os
 
 # Add the project root to Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.data_pipeline import get_sample_data
+from src.data_pipeline import get_sample_data, process_data
 from src.causal_models import estimate_cate
-from src.portfolio_builder import causal_portfolio_weights, markowitz_weights, backtest_portfolio
+from src.portfolio_builder import causal_portfolio_weights, markowitz_weights
 
-app = FastAPI(title="Causal Finance API")
+app = FastAPI(
+    title="Causal Finance API",
+    description="API for causal portfolio optimization",
+    version="1.0.0"
+)
 
 # Configure CORS for frontend
 app.add_middleware(
@@ -23,6 +26,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.get("/")
+async def read_root():
+    return {
+        "message": "Welcome to Causal Finance API",
+        "version": "1.0.0",
+        "endpoints": [
+            "/api/sample-data",
+            "/api/upload",
+            "/api/simulate",
+            "/api/portfolio",
+            "/api/backtest"
+        ]
+    }
 
 @app.get("/api/sample-data")
 async def get_sample_dataset():

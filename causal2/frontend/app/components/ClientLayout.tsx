@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Image from 'next/image';
 
 export default function ClientLayout({
   children,
@@ -23,10 +24,12 @@ export default function ClientLayout({
         <div className="flex justify-between h-16">
           <div className="flex">
             <div className="flex-shrink-0 flex items-center">
-              <img
+              <Image
                 className="h-8 w-8"
                 src="/logo.svg"
                 alt="Causal Finance"
+                width={32}
+                height={32}
               />
               <span className="ml-2 text-xl font-semibold">
                 Causal Finance

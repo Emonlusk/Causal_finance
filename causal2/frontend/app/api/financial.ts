@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { SampleData, SimulationResult, Portfolio, BacktestResult } from '../types/api';
 
 const API_BASE_URL = 'http://localhost:8000/api';
 
@@ -19,10 +20,10 @@ export const financialApi = {
   // Get sample dataset
   getSampleData: async () => {
     try {
-      const response = await api.get<ApiResponse<any>>('/sample-data');
+      const response = await api.get<ApiResponse<SampleData>>('/sample-data');
       return response.data;
-    } catch (error: any) {
-      throw new Error(error.response?.data?.detail || 'Failed to fetch sample data');
+    } catch (error: Error) {
+      throw new Error((error as any).response?.data?.detail || 'Failed to fetch sample data');
     }
   },
 
