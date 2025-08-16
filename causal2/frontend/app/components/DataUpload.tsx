@@ -2,7 +2,11 @@
 import { useState } from 'react';
 import { CloudArrowUpIcon, DocumentIcon } from '@heroicons/react/24/outline';
 
-export default function DataUpload() {
+interface DataUploadProps {
+  onDataLoaded?: () => void;
+}
+
+export default function DataUpload({ onDataLoaded }: DataUploadProps) {
   const [dragActive, setDragActive] = useState(false);
   
   const handleDrag = (e: React.DragEvent) => {
