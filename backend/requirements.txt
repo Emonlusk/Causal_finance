@@ -1,0 +1,35 @@
+# Flask and extensions
+Flask==3.0.3
+Flask-SQLAlchemy==3.1.1
+Flask-Migrate==4.0.7
+Flask-JWT-Extended==4.6.0
+Flask-CORS==4.0.1
+Flask-Caching==2.3.0
+
+# Database
+SQLAlchemy==2.0.30
+
+# Data processing (use versions with pre-built wheels)
+pandas==2.2.2
+numpy==1.26.4
+
+# Financial data APIs
+yfinance==0.2.40
+fredapi==0.5.2
+
+# Causal inference (optional - install separately if needed)
+# dowhy==0.11.1
+# econml==0.15.1
+
+# Optimization
+scipy==1.13.1
+
+# Utilities
+python-dotenv==1.0.1
+marshmallow==3.21.3
+werkzeug==3.0.3
+gunicorn==22.0.0
+
+# Development
+pytest
+black
