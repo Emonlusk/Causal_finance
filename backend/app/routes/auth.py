@@ -47,9 +47,9 @@ def register():
     db.session.add(user)
     db.session.commit()
     
-    # Generate tokens
-    access_token = create_access_token(identity=user.id)
-    refresh_token = create_refresh_token(identity=user.id)
+    # Generate tokens (identity must be string)
+    access_token = create_access_token(identity=str(user.id))
+    refresh_token = create_refresh_token(identity=str(user.id))
     
     # Log activity
     Activity.log_activity(
@@ -73,13 +73,18 @@ def login():
     data = request.get_json()
     
     if not data:
-        return jsonify({'error': 'No data provided'}), 400
+        return jsonify({'error': 'No data provided', 'details': 'Request body must be JSON'}), 400
     
     email = data.get('email')
     password = data.get('password')
     
     if not email or not password:
-        return jsonify({'error': 'Email and password are required'}), 400
+        missing = []
+        if not email:
+            missing.append('email')
+        if not password:
+            missing.append('password')
+        return jsonify({'error': 'Email and password are required', 'missing': missing}), 400
     
     # Find user
     user = User.query.filter_by(email=email).first()
@@ -91,9 +96,9 @@ def login():
     user.last_login = datetime.utcnow()
     db.session.commit()
     
-    # Generate tokens
-    access_token = create_access_token(identity=user.id)
-    refresh_token = create_refresh_token(identity=user.id)
+    # Generate tokens (identity must be string)
+    access_token = create_access_token(identity=str(user.id))
+    refresh_token = create_refresh_token(identity=str(user.id))
     
     return jsonify({
         'message': 'Login successful',

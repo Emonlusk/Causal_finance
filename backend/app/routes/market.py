@@ -115,3 +115,45 @@ def get_market_condition():
     return jsonify({
         'condition': condition
     }), 200
+
+
+@market_bp.route('/search', methods=['GET'])
+def search_stocks():
+    """Search for stocks by symbol or name"""
+    query = request.args.get('q', '')
+    
+    if not query or len(query) < 1:
+        return jsonify({'error': 'Search query required'}), 400
+    
+    from app.services.market_service import search_stocks as search_fn
+    results = search_fn(query)
+    
+    return jsonify({
+        'query': query,
+        'results': results
+    }), 200
+
+
+@market_bp.route('/news', methods=['GET'])
+def get_news():
+    """Get financial news, optionally for a specific stock"""
+    symbol = request.args.get('symbol')
+    
+    from app.services.market_service import get_stock_news
+    news = get_stock_news(symbol)
+    
+    return jsonify({
+        'symbol': symbol or 'market',
+        'news': news
+    }), 200
+
+
+@market_bp.route('/trending', methods=['GET'])
+def get_trending():
+    """Get trending/most active stocks"""
+    from app.services.market_service import get_trending_stocks
+    stocks = get_trending_stocks()
+    
+    return jsonify({
+        'trending': stocks
+    }), 200

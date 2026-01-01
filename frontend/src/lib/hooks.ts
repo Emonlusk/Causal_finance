@@ -11,18 +11,25 @@ import {
   causalApi,
   scenarioApi,
   userApi,
+  mlApi,
+  activityApi,
+  getAccessToken,
   type User,
   type RegisterData,
   type Portfolio,
   type CreatePortfolioData,
   type CausalGraph,
   type CreateCausalGraphData,
+  type CreateScenarioData,
   type OptimizationRequest,
   type BacktestRequest,
   type TreatmentEffectRequest,
   type RunScenarioRequest,
   type UpdateProfileData,
 } from './api';
+
+// Helper to check if user is authenticated
+const isAuthenticated = () => !!getAccessToken();
 
 // ============================================
 // Auth Hooks
@@ -132,6 +139,31 @@ export function useMarketCondition() {
   });
 }
 
+export function useStockSearch(query: string) {
+  return useQuery({
+    queryKey: ['stockSearch', query],
+    queryFn: () => marketApi.searchStocks(query),
+    staleTime: 5 * 60 * 1000,
+    enabled: query.length >= 1,
+  });
+}
+
+export function useNews(symbol?: string) {
+  return useQuery({
+    queryKey: ['news', symbol],
+    queryFn: () => marketApi.getNews(symbol),
+    staleTime: 10 * 60 * 1000, // 10 minutes
+  });
+}
+
+export function useTrendingStocks() {
+  return useQuery({
+    queryKey: ['trendingStocks'],
+    queryFn: () => marketApi.getTrending(),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 // ============================================
 // Portfolio Hooks
 // ============================================
@@ -140,6 +172,8 @@ export function usePortfolios() {
     queryKey: ['portfolios'],
     queryFn: () => portfolioApi.getAll(),
     staleTime: 5 * 60 * 1000,
+    enabled: isAuthenticated(),
+    retry: 1,
   });
 }
 
@@ -212,6 +246,84 @@ export function useSectors() {
     queryKey: ['sectors'],
     queryFn: () => portfolioApi.getSectors(),
     staleTime: Infinity, // Static data
+  });
+}
+
+// ============================================
+// Paper Trading Hooks
+// ============================================
+export function usePaperTradingBalance() {
+  return useQuery({
+    queryKey: ['paperTradingBalance'],
+    queryFn: () => userApi.getPaperTradingBalance(),
+    staleTime: 60 * 1000, // 1 minute
+    enabled: isAuthenticated(),
+    retry: 1,
+  });
+}
+
+export function useDepositPaperMoney() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: (amount: number) => userApi.depositPaperMoney(amount),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['paperTradingBalance'] });
+      queryClient.invalidateQueries({ queryKey: ['activities'] });
+    },
+  });
+}
+
+export function useWithdrawPaperMoney() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: (amount: number) => userApi.withdrawPaperMoney(amount),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['paperTradingBalance'] });
+      queryClient.invalidateQueries({ queryKey: ['activities'] });
+    },
+  });
+}
+
+export function useExecuteTrade() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: ({ portfolioId, data }: { portfolioId: number; data: { symbol: string; action: 'buy' | 'sell'; shares: number } }) =>
+      portfolioApi.executeTrade(portfolioId, data),
+    onSuccess: (_, { portfolioId }) => {
+      queryClient.invalidateQueries({ queryKey: ['portfolios'] });
+      queryClient.invalidateQueries({ queryKey: ['portfolio', portfolioId] });
+      queryClient.invalidateQueries({ queryKey: ['portfolioHoldings', portfolioId] });
+      queryClient.invalidateQueries({ queryKey: ['paperTradingBalance'] });
+      queryClient.invalidateQueries({ queryKey: ['activities'] });
+    },
+  });
+}
+
+export function usePortfolioHoldings(portfolioId: number) {
+  return useQuery({
+    queryKey: ['portfolioHoldings', portfolioId],
+    queryFn: () => portfolioApi.getHoldings(portfolioId),
+    enabled: portfolioId > 0 && isAuthenticated(),
+    staleTime: 60 * 1000, // 1 minute
+  });
+}
+
+export function useAllocateCash() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: ({ portfolioId, amount }: { portfolioId: number; amount: number }) =>
+      portfolioApi.allocateCash(portfolioId, amount),
+    onSuccess: (_, { portfolioId }) => {
+      queryClient.invalidateQueries({ queryKey: ['portfolios'] });
+      queryClient.invalidateQueries({ queryKey: ['portfolio', portfolioId] });
+      queryClient.invalidateQueries({ queryKey: ['paperTradingBalance'] });
+      queryClient.invalidateQueries({ queryKey: ['portfolioHoldings', portfolioId] });
+      queryClient.invalidateQueries({ queryKey: ['activities'] });
+    },
   });
 }
 
@@ -317,6 +429,17 @@ export function useScenario(id: number) {
   });
 }
 
+export function useCreateScenario() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: (scenario: CreateScenarioData) => scenarioApi.create(scenario),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['scenarios'] });
+    },
+  });
+}
+
 export function useDeleteScenario() {
   const queryClient = useQueryClient();
   
@@ -399,5 +522,152 @@ export function useUserPerformance() {
     queryKey: ['userPerformance'],
     queryFn: () => userApi.getPerformance(),
     staleTime: 5 * 60 * 1000,
+  });
+}
+
+// ============================================
+// ML Hooks
+// ============================================
+export function useStartMLTraining() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: (data?: { start_date?: string; end_date?: string; fred_api_key?: string; skip_data_fetch?: boolean }) =>
+      mlApi.startTraining(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['mlTrainingStatus'] });
+      queryClient.invalidateQueries({ queryKey: ['mlModels'] });
+    },
+  });
+}
+
+export function useMLTrainingStatus(pipelineId?: string) {
+  return useQuery({
+    queryKey: ['mlTrainingStatus', pipelineId],
+    queryFn: () => mlApi.getTrainingStatus(pipelineId),
+    staleTime: 10 * 1000, // 10 seconds
+    refetchInterval: 30 * 1000, // Refetch every 30 seconds while training
+  });
+}
+
+export function useFetchMLData() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: (data?: { start_date?: string; end_date?: string; fred_api_key?: string }) =>
+      mlApi.fetchData(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['mlDataStatus'] });
+    },
+  });
+}
+
+export function useMLDataStatus() {
+  return useQuery({
+    queryKey: ['mlDataStatus'],
+    queryFn: () => mlApi.getDataStatus(),
+    staleTime: 60 * 1000, // 1 minute
+  });
+}
+
+export function usePredictSector() {
+  return useMutation({
+    mutationFn: ({ sector, horizon }: { sector: string; horizon?: number }) =>
+      mlApi.predictSector(sector, horizon),
+  });
+}
+
+export function usePredictVolatility() {
+  return useMutation({
+    mutationFn: ({ sector, horizon }: { sector: string; horizon?: number }) =>
+      mlApi.predictVolatility(sector, horizon),
+  });
+}
+
+export function useCurrentRegime() {
+  return useQuery({
+    queryKey: ['currentRegime'],
+    queryFn: () => mlApi.getCurrentRegime(),
+    staleTime: 30 * 60 * 1000, // 30 minutes
+  });
+}
+
+export function useRegimeRecommendations() {
+  return useQuery({
+    queryKey: ['regimeRecommendations'],
+    queryFn: () => mlApi.getRegimeRecommendations(),
+    staleTime: 30 * 60 * 1000,
+  });
+}
+
+export function useComputeGrangerCausality() {
+  return useMutation({
+    mutationFn: ({ causeVariable, effectVariable, maxLag }: { causeVariable: string; effectVariable: string; maxLag?: number }) =>
+      mlApi.computeGrangerCausality(causeVariable, effectVariable, maxLag),
+  });
+}
+
+export function useMLCausalDag() {
+  return useQuery({
+    queryKey: ['mlCausalDag'],
+    queryFn: () => mlApi.getCausalDag(),
+    staleTime: 60 * 60 * 1000, // 1 hour
+  });
+}
+
+export function useMLSensitivityMatrix() {
+  return useQuery({
+    queryKey: ['mlSensitivityMatrix'],
+    queryFn: () => mlApi.getMLSensitivityMatrix(),
+    staleTime: 60 * 60 * 1000,
+  });
+}
+
+export function useMLModels() {
+  return useQuery({
+    queryKey: ['mlModels'],
+    queryFn: () => mlApi.listModels(),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useMLActiveModel(modelType: string) {
+  return useQuery({
+    queryKey: ['mlActiveModel', modelType],
+    queryFn: () => mlApi.getActiveModel(modelType),
+    enabled: !!modelType,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useActivateMLModel() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: ({ modelType, modelId }: { modelType: string; modelId: string }) =>
+      mlApi.activateModel(modelType, modelId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['mlModels'] });
+      queryClient.invalidateQueries({ queryKey: ['mlActiveModel'] });
+    },
+  });
+}
+
+export function useMLHealth() {
+  return useQuery({
+    queryKey: ['mlHealth'],
+    queryFn: () => mlApi.getHealth(),
+    staleTime: 30 * 1000, // 30 seconds
+  });
+}
+
+// ============================================
+// Activity Hooks
+// ============================================
+export function useActivities(limit: number = 20) {
+  return useQuery({
+    queryKey: ['activities', limit],
+    queryFn: () => activityApi.getActivities(limit),
+    staleTime: 60 * 1000, // 1 minute
   });
 }

@@ -2,7 +2,6 @@ import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
 import { SummaryCards } from "@/components/dashboard/SummaryCards";
 import { PerformanceChart } from "@/components/dashboard/PerformanceChart";
 import { ActivityFeed } from "@/components/dashboard/ActivityFeed";
-import { QuickSimulator } from "@/components/dashboard/QuickSimulator";
 
 const Dashboard = () => {
   return (
@@ -14,11 +13,8 @@ const Dashboard = () => {
         {/* Performance Chart */}
         <PerformanceChart />
 
-        {/* Bottom Row */}
-        <div className="grid lg:grid-cols-2 gap-6">
-          <ActivityFeed />
-          <QuickSimulator />
-        </div>
+        {/* Activity Feed - Full Width */}
+        <ActivityFeed />
       </div>
     </DashboardLayout>
   );

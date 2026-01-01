@@ -2,16 +2,30 @@
 Causal Inference Service
 Provides treatment effect estimation, DAG validation, and sector sensitivity analysis
 Uses DoWhy and EconML for causal inference
+
+NOW INTEGRATED WITH ML MODELS:
+- Uses trained sensitivity matrix from treatment_effects.py
+- Falls back to defaults if models not trained yet
 """
 
 from typing import Dict, List, Any, Optional
 import logging
+import os
 import numpy as np
 
 logger = logging.getLogger(__name__)
 
+# Try to import ML services
+try:
+    from .ml_training_pipeline import PredictionService, get_prediction_service
+    ML_AVAILABLE = True
+except ImportError:
+    ML_AVAILABLE = False
+    logger.warning("ML services not available, using default sensitivity matrix")
+
 # Predefined sector sensitivity coefficients (based on empirical research)
 # These represent estimated causal effects of economic factors on sector returns
+# Used as FALLBACK when ML models are not trained
 DEFAULT_SECTOR_SENSITIVITY = {
     'technology': {
         'interest_rates': -0.8,
@@ -115,6 +129,37 @@ DEFAULT_SECTOR_SENSITIVITY = {
 }
 
 
+def _get_trained_sensitivity_matrix() -> Optional[Dict]:
+    """
+    Try to get the trained sensitivity matrix from ML models.
+    Returns None if not available.
+    """
+    if not ML_AVAILABLE:
+        return None
+    
+    try:
+        service = get_prediction_service()
+        return service.get_sensitivity_matrix()
+    except Exception as e:
+        logger.debug(f"Could not load trained sensitivity matrix: {e}")
+        return None
+
+
+def get_active_sensitivity_matrix() -> Dict[str, Dict[str, float]]:
+    """
+    Get the currently active sensitivity matrix.
+    Uses trained ML model if available, otherwise falls back to defaults.
+    """
+    trained_matrix = _get_trained_sensitivity_matrix()
+    
+    if trained_matrix:
+        logger.info("Using trained ML sensitivity matrix")
+        return trained_matrix
+    
+    logger.info("Using default sensitivity matrix (ML models not trained)")
+    return DEFAULT_SECTOR_SENSITIVITY
+
+
 def estimate_causal_effect(
     treatment: str,
     outcome: str,
@@ -207,7 +252,10 @@ def estimate_causal_effect(
 
 
 def _get_base_effect(treatment: str, outcome: str) -> float:
-    """Get base effect from sensitivity matrix"""
+    """Get base effect from sensitivity matrix (trained or default)"""
+    # Get active sensitivity matrix (trained ML model or defaults)
+    sensitivity_matrix = get_active_sensitivity_matrix()
+    
     # Normalize outcome name
     outcome_normalized = outcome.lower().replace(' ', '_').replace('-', '_')
     
@@ -227,8 +275,8 @@ def _get_base_effect(treatment: str, outcome: str) -> float:
     
     outcome_key = outcome_map.get(outcome_normalized, outcome_normalized)
     
-    if outcome_key in DEFAULT_SECTOR_SENSITIVITY:
-        return DEFAULT_SECTOR_SENSITIVITY[outcome_key].get(treatment, 0)
+    if outcome_key in sensitivity_matrix:
+        return sensitivity_matrix[outcome_key].get(treatment, 0)
     
     return 0
 
@@ -272,14 +320,21 @@ def _interpret_effect(treatment: str, outcome: str, effect: float) -> str:
     return f"A 1% increase in {treatment_label} {magnitude} {direction} {outcome_label} returns by {abs(effect)*100:.1f}%"
 
 
-def get_sector_sensitivity_matrix() -> Dict[str, Any]:
+def get_sector_sensitivity_matrix(user_id: int = None) -> Dict[str, Any]:
     """
     Get the complete sector sensitivity matrix
     Shows how each sector responds to economic factors
+    Uses trained ML model if available, otherwise falls back to defaults
+    
+    Args:
+        user_id: Optional user ID (for future per-user trained models)
     """
+    # Get active matrix (trained or default)
+    active_matrix = get_active_sensitivity_matrix()
+    
     # Format for frontend heatmap visualization
     economic_factors = ['interest_rates', 'inflation', 'gdp_growth', 'unemployment', 'vix', 'oil_price']
-    sectors = list(DEFAULT_SECTOR_SENSITIVITY.keys())
+    sectors = list(active_matrix.keys())
     
     # Build matrix
     matrix = []
@@ -289,25 +344,31 @@ def get_sector_sensitivity_matrix() -> Dict[str, Any]:
             'sector_key': sector
         }
         for factor in economic_factors:
-            row[factor] = DEFAULT_SECTOR_SENSITIVITY[sector].get(factor, 0)
+            row[factor] = active_matrix[sector].get(factor, 0)
         matrix.append(row)
     
     # Calculate summary statistics
     summary = {}
     for factor in economic_factors:
-        values = [DEFAULT_SECTOR_SENSITIVITY[s].get(factor, 0) for s in sectors]
+        values = [active_matrix[s].get(factor, 0) for s in sectors]
         summary[factor] = {
             'mean': round(np.mean(values), 3),
             'std': round(np.std(values), 3),
-            'most_positive': sectors[np.argmax(values)],
-            'most_negative': sectors[np.argmin(values)]
+            'most_positive': sectors[np.argmax(values)] if values else '',
+            'most_negative': sectors[np.argmin(values)] if values else ''
         }
+    
+    # Indicate if using trained model
+    trained_matrix = _get_trained_sensitivity_matrix()
+    is_trained = trained_matrix is not None
     
     return {
         'matrix': matrix,
         'factors': economic_factors,
         'sectors': sectors,
-        'summary': summary
+        'summary': summary,
+        'is_ml_trained': is_trained,
+        'source': 'ML Model' if is_trained else 'Default Coefficients'
     }
 
 
@@ -420,12 +481,16 @@ def get_treatment_recommendations(
     """
     Generate portfolio recommendations based on causal relationships
     and expected economic changes
+    Uses trained ML sensitivity matrix if available
     """
     recommendations = []
     
+    # Get active sensitivity matrix
+    sensitivity_matrix = get_active_sensitivity_matrix()
+    
     for sector, weight in current_weights.items():
         sector_key = sector.lower().replace(' ', '_')
-        if sector_key not in DEFAULT_SECTOR_SENSITIVITY:
+        if sector_key not in sensitivity_matrix:
             continue
         
         # Calculate expected impact
@@ -433,7 +498,7 @@ def get_treatment_recommendations(
         impacts = []
         
         for factor, change in economic_forecast.items():
-            sensitivity = DEFAULT_SECTOR_SENSITIVITY[sector_key].get(factor, 0)
+            sensitivity = sensitivity_matrix[sector_key].get(factor, 0)
             impact = sensitivity * change
             total_impact += impact
             

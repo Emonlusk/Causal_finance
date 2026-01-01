@@ -17,9 +17,33 @@ numpy==1.26.4
 yfinance==0.2.40
 fredapi==0.5.2
 
-# Causal inference (optional - install separately if needed)
-# dowhy==0.11.1
-# econml==0.15.1
+# ============================================
+# MACHINE LEARNING & CAUSAL INFERENCE
+# ============================================
+
+# Core ML
+scikit-learn==1.5.2
+
+# Time Series Analysis & Forecasting
+statsmodels==0.14.4
+arch==7.1.0
+
+# Causal Inference
+dowhy==0.11.1
+econml==0.15.1
+
+# Bayesian Networks & Causal Discovery
+pgmpy==0.1.26
+
+# Deep Learning (CPU versions for portability)
+torch==2.5.1
+torchvision==0.20.1
+
+# Regime Detection
+hmmlearn==0.3.3
+
+# Model Serialization
+joblib==1.4.2
 
 # Optimization
 scipy==1.13.1
@@ -29,6 +53,7 @@ python-dotenv==1.0.1
 marshmallow==3.21.3
 werkzeug==3.0.3
 gunicorn==22.0.0
+tqdm==4.67.1
 
 # Development
 pytest

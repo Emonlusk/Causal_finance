@@ -18,6 +18,12 @@ class Portfolio(db.Model):
     # Asset weights stored as JSON: {"XLK": 0.25, "XLV": 0.20, "XLE": 0.15, ...}
     weights = db.Column(db.JSON, default=dict)
     
+    # Paper Trading Holdings: {"XLK": {"shares": 100, "avg_cost": 150.50}, ...}
+    holdings = db.Column(db.JSON, default=dict)
+    
+    # Cash allocated to this portfolio for paper trading
+    cash_balance = db.Column(db.Float, default=0.0)
+    
     # Performance metrics stored as JSON
     # {"expected_return": 0.12, "volatility": 0.15, "sharpe_ratio": 0.8, "max_drawdown": -0.15}
     performance_metrics = db.Column(db.JSON, default=dict)
@@ -43,6 +49,8 @@ class Portfolio(db.Model):
             'description': self.description,
             'portfolio_type': self.portfolio_type,
             'weights': self.weights,
+            'holdings': self.holdings or {},
+            'cash_balance': self.cash_balance or 0.0,
             'performance_metrics': self.performance_metrics,
             'optimization_objective': self.optimization_objective,
             'time_horizon': self.time_horizon,

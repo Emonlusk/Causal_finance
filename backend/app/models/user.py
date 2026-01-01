@@ -17,6 +17,9 @@ class User(db.Model):
     investment_goals = db.Column(db.Text)
     investment_horizon = db.Column(db.String(50), default='5Y')  # 1M, 3M, 1Y, 5Y, 10Y+
     
+    # Paper Trading - Cash balance for virtual trading
+    cash_balance = db.Column(db.Float, default=0.0)  # Virtual cash for paper trading
+    
     # Account info
     plan = db.Column(db.String(50), default='free')  # free, pro, enterprise
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -46,6 +49,7 @@ class User(db.Model):
             'investment_goals': self.investment_goals,
             'investment_horizon': self.investment_horizon,
             'plan': self.plan,
+            'cash_balance': self.cash_balance or 0.0,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'portfolio_count': self.portfolios.count(),
         }

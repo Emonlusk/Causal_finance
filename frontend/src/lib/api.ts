@@ -3,7 +3,8 @@
  * Centralizes all API calls to the Flask backend
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+// In development with Vite proxy, use relative URLs; in production use full URL
+const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
 // Token management
 let accessToken: string | null = localStorage.getItem('accessToken');
@@ -96,7 +97,7 @@ async function refreshAccessToken(): Promise<boolean> {
 // Auth API
 // ============================================
 export const authApi = {
-  login: async (email: string, password: string) => {
+  login: async (credentials: { email: string; password: string }) => {
     const data = await fetchWithAuth<{
       message: string;
       user: User;
@@ -104,7 +105,7 @@ export const authApi = {
       refresh_token: string;
     }>('/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify(credentials),
     });
     setTokens(data.access_token, data.refresh_token);
     return data;
@@ -133,6 +134,8 @@ export const authApi = {
   },
 
   getCurrentUser: () => fetchWithAuth<{ user: User }>('/auth/me'),
+  
+  getProfile: () => fetchWithAuth<{ user: User }>('/auth/me'),
 };
 
 // ============================================
@@ -165,6 +168,15 @@ export const marketApi = {
 
   getMarketCondition: () =>
     fetchWithAuth<{ condition: MarketCondition }>('/market/condition'),
+
+  searchStocks: (query: string) =>
+    fetchWithAuth<{ query: string; results: StockSearchResult[] }>(`/market/search?q=${encodeURIComponent(query)}`),
+
+  getNews: (symbol?: string) =>
+    fetchWithAuth<{ symbol: string; news: NewsItem[] }>(`/market/news${symbol ? `?symbol=${symbol}` : ''}`),
+
+  getTrending: () =>
+    fetchWithAuth<{ trending: TrendingStock[] }>('/market/trending'),
 };
 
 // ============================================
@@ -213,6 +225,47 @@ export const portfolioApi = {
 
   getSectors: () =>
     fetchWithAuth<{ sectors: Record<string, SectorInfo> }>('/portfolios/sectors'),
+
+  // Paper Trading
+  executeTrade: (portfolioId: number, data: { symbol: string; action: 'buy' | 'sell'; shares: number }) =>
+    fetchWithAuth<{ 
+      message: string; 
+      trade: { action: string; symbol: string; shares: number; price: number; total: number };
+      portfolio: Portfolio;
+      user_balance: number;
+    }>(`/portfolios/${portfolioId}/trade`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  getHoldings: (portfolioId: number) =>
+    fetchWithAuth<{
+      portfolio_id: number;
+      portfolio_name: string;
+      holdings: Array<{
+        symbol: string;
+        shares: number;
+        avg_cost: number;
+        current_price: number;
+        market_value: number;
+        cost_basis: number;
+        gain_loss: number;
+        gain_loss_pct: number;
+      }>;
+      total_value: number;
+      cash_balance: number;
+      total_equity: number;
+    }>(`/portfolios/${portfolioId}/holdings`),
+
+  allocateCash: (portfolioId: number, amount: number) =>
+    fetchWithAuth<{
+      message: string;
+      user_balance: number;
+      portfolio_balance: number;
+    }>(`/portfolios/${portfolioId}/allocate-cash`, {
+      method: 'POST',
+      body: JSON.stringify({ amount }),
+    }),
 };
 
 // ============================================
@@ -325,6 +378,22 @@ export const userApi = {
 
   getPerformance: () =>
     fetchWithAuth<{ performance: UserPerformance }>('/users/performance'),
+
+  // Paper Trading
+  getPaperTradingBalance: () =>
+    fetchWithAuth<{ cash_balance: number; currency: string }>('/users/paper-trading/balance'),
+
+  depositPaperMoney: (amount: number) =>
+    fetchWithAuth<{ message: string; new_balance: number; deposit_amount: number }>('/users/paper-trading/deposit', {
+      method: 'POST',
+      body: JSON.stringify({ amount }),
+    }),
+
+  withdrawPaperMoney: (amount: number) =>
+    fetchWithAuth<{ message: string; new_balance: number; withdrawal_amount: number }>('/users/paper-trading/withdraw', {
+      method: 'POST',
+      body: JSON.stringify({ amount }),
+    }),
 };
 
 // ============================================
@@ -338,6 +407,7 @@ export interface User {
   investment_goals?: string;
   investment_horizon: string;
   plan: string;
+  cash_balance: number;
   created_at: string;
   portfolio_count: number;
 }
@@ -412,6 +482,37 @@ export interface MarketCondition {
   factors: string[];
   indicators: MarketIndicators;
   timestamp: string;
+}
+
+export interface StockSearchResult {
+  symbol: string;
+  name: string;
+  price: number;
+  change: number;
+  volume: number;
+  market_cap: number;
+  sector: string;
+}
+
+export interface NewsItem {
+  title: string;
+  summary: string;
+  publisher: string;
+  link: string;
+  published: string;
+  type: string;
+  thumbnail: string | null;
+  related_tickers: string[];
+}
+
+export interface TrendingStock {
+  symbol: string;
+  name: string;
+  price: number;
+  change: number;
+  volume: number;
+  day_high: number;
+  day_low: number;
 }
 
 export interface Portfolio {
@@ -719,4 +820,276 @@ export interface UserPerformance {
     volatility: number;
     sharpe_ratio: number;
   }[];
+}
+
+// ============================================
+// ML API
+// ============================================
+export const mlApi = {
+  // Training
+  startTraining: (data?: { start_date?: string; end_date?: string; fred_api_key?: string; skip_data_fetch?: boolean }) =>
+    fetchWithAuth<MLTrainingResponse>('/ml/train', {
+      method: 'POST',
+      body: JSON.stringify(data || {}),
+    }),
+
+  getTrainingStatus: (pipelineId?: string) =>
+    fetchWithAuth<MLTrainingStatus>(pipelineId ? `/ml/train/status/${pipelineId}` : '/ml/train/status'),
+
+  // Data
+  fetchData: (data?: { start_date?: string; end_date?: string; fred_api_key?: string }) =>
+    fetchWithAuth<MLDataFetchResponse>('/ml/data/fetch', {
+      method: 'POST',
+      body: JSON.stringify(data || {}),
+    }),
+
+  getDataStatus: () =>
+    fetchWithAuth<MLDataStatus>('/ml/data/status'),
+
+  // Predictions
+  predictSector: (sector: string, horizon: number = 21) =>
+    fetchWithAuth<MLSectorPrediction>('/ml/predict/sector', {
+      method: 'POST',
+      body: JSON.stringify({ sector, horizon }),
+    }),
+
+  predictVolatility: (sector: string, horizon: number = 21) =>
+    fetchWithAuth<MLVolatilityPrediction>('/ml/predict/volatility', {
+      method: 'POST',
+      body: JSON.stringify({ sector, horizon }),
+    }),
+
+  // Regime Detection
+  getCurrentRegime: () =>
+    fetchWithAuth<MLRegimeResponse>('/ml/regime/current'),
+
+  getRegimeRecommendations: () =>
+    fetchWithAuth<MLRegimeRecommendations>('/ml/regime/recommendations'),
+
+  // Causal Analysis
+  computeGrangerCausality: (causeVariable: string, effectVariable: string, maxLag: number = 5) =>
+    fetchWithAuth<MLGrangerResult>('/ml/causal/granger', {
+      method: 'POST',
+      body: JSON.stringify({ cause_variable: causeVariable, effect_variable: effectVariable, max_lag: maxLag }),
+    }),
+
+  getCausalDag: () =>
+    fetchWithAuth<MLCausalDag>('/ml/causal/dag'),
+
+  getMLSensitivityMatrix: () =>
+    fetchWithAuth<MLSensitivityMatrix>('/ml/causal/sensitivity-matrix'),
+
+  // Model Management
+  listModels: () =>
+    fetchWithAuth<MLModelList>('/ml/models'),
+
+  getActiveModel: (modelType: string) =>
+    fetchWithAuth<MLActiveModel>(`/ml/models/${modelType}/active`),
+
+  activateModel: (modelType: string, modelId: string) =>
+    fetchWithAuth<{ success: boolean; message: string }>(`/ml/models/${modelType}/${modelId}/activate`, {
+      method: 'POST',
+    }),
+
+  // Health Check
+  getHealth: () =>
+    fetchWithAuth<MLHealthStatus>('/ml/health'),
+};
+
+// ============================================
+// Activity API
+// ============================================
+export const activityApi = {
+  getActivities: (limit: number = 20) =>
+    fetchWithAuth<{ activities: Activity[] }>(`/users/activities?limit=${limit}`),
+};
+
+// ============================================
+// ML Type Definitions
+// ============================================
+export interface MLTrainingResponse {
+  success: boolean;
+  pipeline_id?: string;
+  message?: string;
+  results?: {
+    causal: boolean;
+    treatment: boolean;
+    forecasting: boolean;
+    regime: boolean;
+  };
+  error?: string;
+}
+
+export interface MLTrainingStatus {
+  success: boolean;
+  status: {
+    status: string;
+    started_at?: string;
+    completed_at?: string;
+    steps_completed: string[];
+    errors: string[];
+  } | Record<string, {
+    status: string;
+    started_at?: string;
+    steps_completed: string[];
+  }>;
+}
+
+export interface MLDataFetchResponse {
+  success: boolean;
+  result?: {
+    sector_data?: { success: boolean; rows?: number };
+    market_indices?: { success: boolean; rows?: number };
+    fred_data?: { success: boolean };
+    feature_matrix?: { success: boolean; rows?: number; columns?: number };
+  };
+  error?: string;
+}
+
+export interface MLDataStatus {
+  success: boolean;
+  status: {
+    sector_data: boolean;
+    macro_data: boolean;
+    feature_matrix: boolean;
+    feature_matrix_rows?: number;
+    feature_matrix_cols?: number;
+    last_update?: string;
+  };
+}
+
+export interface MLSectorPrediction {
+  success: boolean;
+  sector: string;
+  horizon: number;
+  predictions: {
+    mean: number[];
+    std: number[];
+    models?: Record<string, { mean: number[]; lower?: number[]; upper?: number[] }>;
+    method?: string;
+  };
+  error?: string;
+}
+
+export interface MLVolatilityPrediction {
+  success: boolean;
+  sector: string;
+  horizon: number;
+  predictions: {
+    volatility: number[];
+    variance: number[];
+  };
+  error?: string;
+}
+
+export interface MLRegimeResponse {
+  success: boolean;
+  regime: {
+    current_regime: string;
+    regime_probability?: number;
+    all_probabilities?: Record<string, number>;
+    observation_date?: string;
+    recommendations?: MLRegimeRecommendation;
+    method?: string;
+    message?: string;
+  };
+}
+
+export interface MLRegimeRecommendation {
+  risk_level: string;
+  equity_allocation: number;
+  bond_allocation: number;
+  cash_allocation: number;
+  sector_tilts: Record<string, string>;
+  strategy: string;
+}
+
+export interface MLRegimeRecommendations {
+  success: boolean;
+  current_regime: string;
+  recommendations: MLRegimeRecommendation;
+}
+
+export interface MLGrangerResult {
+  success: boolean;
+  result: {
+    is_significant: boolean;
+    p_value: number;
+    f_statistic: number;
+    optimal_lag: number;
+    cause: string;
+    effect: string;
+    direction: string;
+  };
+  error?: string;
+}
+
+export interface MLCausalDag {
+  success: boolean;
+  dag: {
+    nodes: string[];
+    edges: { from: string; to: string; weight: number; method: string }[];
+    granger_edges?: { from: string; to: string; weight: number }[];
+    transfer_entropy_edges?: { from: string; to: string; weight: number }[];
+  };
+  error?: string;
+}
+
+export interface MLSensitivityMatrix {
+  success: boolean;
+  sensitivity_matrix: Record<string, Record<string, number>>;
+  error?: string;
+}
+
+export interface MLModelList {
+  success: boolean;
+  summary: {
+    total_models: number;
+    by_type: Record<string, { count: number; models: string[] }>;
+    active_models: Record<string, string>;
+  };
+  models: Record<string, Record<string, {
+    model_name: string;
+    version: string;
+    metrics: Record<string, unknown>;
+    created_at: string;
+    is_active: boolean;
+  }>>;
+}
+
+export interface MLActiveModel {
+  success: boolean;
+  model?: {
+    model_name: string;
+    version: string;
+    metrics: Record<string, unknown>;
+    hyperparameters: Record<string, unknown>;
+    filepath: string;
+    created_at: string;
+    is_active: boolean;
+  };
+  error?: string;
+}
+
+export interface MLHealthStatus {
+  success: boolean;
+  status: {
+    ml_service: string;
+    models_available: boolean;
+    data_available: boolean;
+  };
+  error?: string;
+}
+
+export interface Activity {
+  id: number;
+  user_id: number;
+  activity_type: string;
+  title: string;
+  description?: string;
+  entity_type?: string;
+  entity_id?: number;
+  metadata?: Record<string, unknown>;
+  is_read: boolean;
+  created_at: string;
 }

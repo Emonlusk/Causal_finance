@@ -9,15 +9,24 @@ scenarios_bp = Blueprint('scenarios', __name__)
 
 
 @scenarios_bp.route('/', methods=['GET'])
-@jwt_required()
+@jwt_required(optional=True)
 def get_scenarios():
-    """Get all scenarios for current user"""
-    current_user_id = get_jwt_identity()
-    scenarios = Scenario.query.filter_by(user_id=current_user_id).order_by(Scenario.created_at.desc()).all()
+    """Get all scenarios for current user
     
-    return jsonify({
-        'scenarios': [s.to_dict() for s in scenarios]
-    }), 200
+    Returns user's scenarios if authenticated, empty list otherwise.
+    """
+    current_user_id = get_jwt_identity()
+    
+    if current_user_id:
+        scenarios = Scenario.query.filter_by(user_id=current_user_id).order_by(Scenario.created_at.desc()).all()
+        return jsonify({
+            'scenarios': [s.to_dict() for s in scenarios]
+        }), 200
+    else:
+        # Return empty list for unauthenticated users
+        return jsonify({
+            'scenarios': []
+        }), 200
 
 
 @scenarios_bp.route('/', methods=['POST'])

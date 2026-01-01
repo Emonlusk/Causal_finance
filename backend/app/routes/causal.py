@@ -164,12 +164,17 @@ def estimate_treatment_effects():
 
 
 @causal_bp.route('/sensitivity-matrix', methods=['GET'])
-@jwt_required()
+@jwt_required(optional=True)
 def get_sensitivity_matrix():
-    """Get sector sensitivity matrix to economic factors"""
-    # This returns precomputed or cached sensitivity data
+    """Get sector sensitivity matrix to economic factors
+    
+    Works for both authenticated and unauthenticated users.
+    Returns ML-trained matrix for authenticated users if available.
+    """
     from app.services.causal_service import get_sector_sensitivity_matrix
-    matrix = get_sector_sensitivity_matrix()
+    
+    current_user_id = get_jwt_identity()
+    matrix = get_sector_sensitivity_matrix(user_id=current_user_id)
     
     return jsonify({
         'sensitivity_matrix': matrix

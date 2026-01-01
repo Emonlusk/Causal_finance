@@ -1,42 +1,88 @@
-import { ReactNode } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { ReactNode, useMemo } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { 
   LayoutDashboard, 
   Search, 
   PieChart, 
   Gamepad2, 
-  BookOpen, 
   Settings,
   ChevronLeft,
   ChevronRight,
   LogOut,
-  Bell
+  Bell,
+  User,
+  Wallet,
+  TrendingUp,
+  TrendingDown
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
+import { useAuth } from "@/contexts/AuthContext";
+import { usePortfolios, usePaperTradingBalance } from "@/lib/hooks";
 
 interface DashboardLayoutProps {
   children: ReactNode;
 }
 
 const navItems = [
-  { icon: LayoutDashboard, label: "Overview", path: "/dashboard" },
-  { icon: Search, label: "Causal Analysis", path: "/analysis" },
+  { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
   { icon: PieChart, label: "Portfolio Builder", path: "/portfolio" },
-  { icon: Gamepad2, label: "Scenario Simulator", path: "/simulator" },
-  { icon: BookOpen, label: "Research & Insights", path: "/research" },
-];
-
-const quickActions = [
-  "Run quick scenario",
-  "Rebalance portfolio", 
-  "Generate report",
+  { icon: Search, label: "Causal Analysis", path: "/analysis" },
+  { icon: Gamepad2, label: "Scenarios", path: "/simulator" },
+  { icon: Wallet, label: "Paper Trading", path: "/paper-trading" },
 ];
 
 export function DashboardLayout({ children }: DashboardLayoutProps) {
   const [collapsed, setCollapsed] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
+  const { user, logout } = useAuth();
+  
+  // Fetch real portfolio data
+  const { data: portfoliosData } = usePortfolios();
+  const { data: balanceData } = usePaperTradingBalance();
+  
+  // Calculate total portfolio value
+  const portfolioStats = useMemo(() => {
+    const portfolios = portfoliosData?.portfolios || [];
+    const balance = balanceData?.balance || { cash_balance: 0, total_invested: 0, total_value: 0 };
+    
+    // Sum up all portfolio values
+    const totalValue = balance.total_value || (balance.cash_balance + balance.total_invested);
+    
+    // Calculate mock return (we'd need historical data for real calculation)
+    const portfolioCount = portfolios.length;
+    
+    return {
+      totalValue,
+      portfolioCount,
+      cashBalance: balance.cash_balance || 0,
+    };
+  }, [portfoliosData, balanceData]);
+
+  const handleLogout = () => {
+    logout();
+    navigate("/");
+  };
+
+  // Get user initials
+  const getInitials = (name: string) => {
+    return name
+      .split(" ")
+      .map((n) => n[0])
+      .join("")
+      .toUpperCase()
+      .slice(0, 2);
+  };
 
   return (
     <div className="min-h-screen bg-background flex">
@@ -68,11 +114,13 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
           <div className="p-4 border-b border-sidebar-border">
             <div className="flex items-center gap-3 mb-3">
               <div className="w-10 h-10 rounded-full bg-sidebar-accent flex items-center justify-center">
-                <span className="text-sm font-semibold">JD</span>
+                <span className="text-sm font-semibold">
+                  {user?.name ? getInitials(user.name) : "U"}
+                </span>
               </div>
               <div className="flex-1 min-w-0">
-                <div className="font-medium text-sm truncate">John Doe</div>
-                <div className="text-xs text-sidebar-foreground/60">Pro Plan</div>
+                <div className="font-medium text-sm truncate">{user?.name || "User"}</div>
+                <div className="text-xs text-sidebar-foreground/60">{user?.email || ""}</div>
               </div>
             </div>
             {/* Risk Meter */}
@@ -87,9 +135,13 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
             </div>
             {/* Portfolio Value */}
             <div className="mt-3 pt-3 border-t border-sidebar-border">
-              <div className="text-xs text-sidebar-foreground/60">Portfolio Value</div>
-              <div className="text-xl font-bold">$125,430</div>
-              <div className="text-xs text-success">+8.3% this month</div>
+              <div className="text-xs text-sidebar-foreground/60">Total Balance</div>
+              <div className="text-xl font-bold">
+                ${portfolioStats.totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </div>
+              <div className="text-xs text-sidebar-foreground/60 mt-1">
+                {portfolioStats.portfolioCount} portfolio{portfolioStats.portfolioCount !== 1 ? 's' : ''} • ${portfolioStats.cashBalance.toLocaleString()} cash
+              </div>
             </div>
           </div>
         )}
@@ -117,35 +169,10 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
               );
             })}
           </ul>
-
-          {/* Quick Actions */}
-          {!collapsed && (
-            <div className="mt-6">
-              <div className="px-3 py-2 text-xs font-semibold text-sidebar-foreground/50 uppercase tracking-wider">
-                Quick Actions
-              </div>
-              <ul className="space-y-1">
-                {quickActions.map((action) => (
-                  <li key={action}>
-                    <button className="w-full text-left px-3 py-2 text-sm text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded-lg transition-colors">
-                      {action}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
         </nav>
 
         {/* Bottom Actions */}
         <div className="p-2 border-t border-sidebar-border">
-          <Link
-            to="/settings"
-            className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-sidebar-accent text-sidebar-foreground/70 hover:text-sidebar-foreground transition-colors"
-          >
-            <Settings className="w-5 h-5" />
-            {!collapsed && <span className="text-sm font-medium">Settings</span>}
-          </Link>
           <button
             onClick={() => setCollapsed(!collapsed)}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-sidebar-accent text-sidebar-foreground/70 hover:text-sidebar-foreground transition-colors"
@@ -176,9 +203,49 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
               <Bell className="w-5 h-5" />
               <span className="absolute top-1 right-1 w-2 h-2 bg-destructive rounded-full" />
             </Button>
-            <Button variant="ghost" size="icon">
-              <LogOut className="w-5 h-5" />
-            </Button>
+            
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="rounded-full">
+                  <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+                    <span className="text-xs font-semibold text-primary">
+                      {user?.name ? getInitials(user.name) : "U"}
+                    </span>
+                  </div>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuLabel>
+                  <div className="flex flex-col">
+                    <span>{user?.name || "User"}</span>
+                    <span className="text-xs font-normal text-muted-foreground">
+                      {user?.email || ""}
+                    </span>
+                  </div>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem asChild>
+                  <Link to="/settings" className="cursor-pointer">
+                    <User className="w-4 h-4 mr-2" />
+                    Profile Settings
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link to="/settings" className="cursor-pointer">
+                    <Settings className="w-4 h-4 mr-2" />
+                    Preferences
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem 
+                  onClick={handleLogout}
+                  className="text-destructive focus:text-destructive cursor-pointer"
+                >
+                  <LogOut className="w-4 h-4 mr-2" />
+                  Sign out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </header>
 
