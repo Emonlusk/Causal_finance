@@ -1,0 +1,3 @@
+# SPA Redirect - All routes go to index.html
+# Works for Netlify, Hostinger, and similar static hosts
+/*    /index.html   200

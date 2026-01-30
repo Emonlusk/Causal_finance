@@ -1,0 +1,36 @@
+# Render Blueprint - Deploy with one click
+# https://render.com/docs/blueprint-spec
+
+databases:
+  - name: causal-finance-db
+    databaseName: causal_finance
+    plan: free
+    region: oregon
+
+services:
+  - type: web
+    name: causal-finance-api
+    runtime: python
+    region: oregon
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements-render.txt && python -c "from app import create_app, db; app = create_app('production'); app.app_context().push(); db.create_all()"
+    startCommand: gunicorn wsgi:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: SECRET_KEY
+        generateValue: true
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: causal-finance-db
+          property: connectionString
+      - key: CORS_ORIGINS
+        sync: false
+      - key: FRED_API_KEY
+        sync: false
+      - key: ALPHA_VANTAGE_API_KEY
+        sync: false
+    healthCheckPath: /api/health
