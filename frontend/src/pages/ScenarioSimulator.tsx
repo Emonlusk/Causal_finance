@@ -153,18 +153,21 @@ const ScenarioSimulator = () => {
     }
     
     try {
+      // Use correct parameter format expected by backend
       const result = await runScenarioMutation.mutateAsync({
-        scenario_params: {
-          interest_rates: rates,
-          inflation: inflation,
-          gdp: gdp,
+        name: `Scenario ${new Date().toLocaleTimeString()}`,
+        parameters: {
+          interest_rates: { change: rates / 100 },  // Convert % to decimal
+          inflation: { change: inflation / 100 },
+          gdp: { change: gdp / 100 },
         },
         portfolio_id: selectedPortfolioId,
+        save_results: false,
       });
-      setSimulationResults(result);
+      setSimulationResults(result?.results || result);
       toast({
         title: "Simulation Complete",
-        description: "Scenario analysis has been completed.",
+        description: `Portfolio impact: ${result?.results?.portfolio_impact_percent || 'N/A'}%`,
       });
     } catch (error) {
       console.error('Simulation failed:', error);
@@ -212,38 +215,51 @@ const ScenarioSimulator = () => {
     }
     
     try {
-      // Calculate optimal weights based on the scenario
-      const weights: Record<string, number> = {};
+      let weights: Record<string, number>;
       
-      // Adjust weights based on scenario analysis
-      if (rates > 1) {
-        // High rates: reduce tech and financials, increase defensive
-        weights['XLK'] = 0.15;
-        weights['XLV'] = 0.30;
-        weights['XLE'] = 0.25;
-        weights['XLF'] = 0.20;
-        weights['XLP'] = 0.10;
-      } else if (inflation > 1) {
-        // High inflation: increase energy and commodities
-        weights['XLK'] = 0.15;
-        weights['XLV'] = 0.20;
-        weights['XLE'] = 0.35;
-        weights['XLF'] = 0.20;
-        weights['XLP'] = 0.10;
-      } else if (gdp < -1) {
-        // Recession: go defensive
-        weights['XLK'] = 0.10;
-        weights['XLV'] = 0.35;
-        weights['XLE'] = 0.10;
-        weights['XLF'] = 0.15;
-        weights['XLP'] = 0.30;
+      // Use simulation results if available (from causal optimization)
+      if (simulationResults?.causal_weights && Object.keys(simulationResults.causal_weights).length > 0) {
+        weights = simulationResults.causal_weights;
+        console.log('Using causal-optimized weights from simulation:', weights);
       } else {
-        // Balanced scenario
-        weights['XLK'] = 0.25;
-        weights['XLV'] = 0.25;
-        weights['XLE'] = 0.20;
-        weights['XLF'] = 0.20;
-        weights['XLP'] = 0.10;
+        // Run simulation first to get optimal weights
+        const result = await runScenarioMutation.mutateAsync({
+          name: `Apply Scenario ${new Date().toLocaleTimeString()}`,
+          parameters: {
+            interest_rates: { change: rates / 100 },
+            inflation: { change: inflation / 100 },
+            gdp: { change: gdp / 100 },
+          },
+          portfolio_id: selectedPortfolioId,
+          save_results: false,
+        });
+        
+        weights = result?.results?.causal_weights || result?.causal_weights;
+        setSimulationResults(result?.results || result);
+        
+        if (!weights || Object.keys(weights).length === 0) {
+          // Fallback: calculate weights based on sector sensitivity
+          const c = sensitivityCoefficients;
+          const techImpact = c.tech.rates * rates + c.tech.inflation * inflation + c.tech.gdp * gdp;
+          const healthImpact = c.health.rates * rates + c.health.inflation * inflation + c.health.gdp * gdp;
+          const energyImpact = c.energy.rates * rates + c.energy.inflation * inflation + c.energy.gdp * gdp;
+          const financeImpact = c.finance.rates * rates + c.finance.inflation * inflation + c.finance.gdp * gdp;
+          
+          // Lower weights for negative impact sectors, higher for positive
+          const baseWeights = {
+            XLK: Math.max(0.05, 0.25 + techImpact * 0.05),
+            XLV: Math.max(0.05, 0.25 + healthImpact * 0.05),
+            XLE: Math.max(0.05, 0.20 + energyImpact * 0.05),
+            XLF: Math.max(0.05, 0.20 + financeImpact * 0.05),
+            XLP: 0.10,
+          };
+          
+          // Normalize to sum to 1
+          const total = Object.values(baseWeights).reduce((a, b) => a + b, 0);
+          weights = Object.fromEntries(
+            Object.entries(baseWeights).map(([k, v]) => [k, v / total])
+          );
+        }
       }
       
       await updatePortfolioMutation.mutateAsync({
@@ -254,9 +270,12 @@ const ScenarioSimulator = () => {
         },
       });
       
+      const improvement = simulationResults?.improvement?.vs_current;
       toast({
         title: "Portfolio Updated",
-        description: "Scenario-based weights have been applied to your portfolio.",
+        description: improvement 
+          ? `Causal-optimized weights applied. Expected improvement: ${improvement}%`
+          : "Scenario-based weights have been applied to your portfolio.",
       });
     } catch (error) {
       console.error('Apply failed:', error);
@@ -388,17 +407,55 @@ const ScenarioSimulator = () => {
 
           {/* Results */}
           <div className="lg:col-span-3 space-y-6">
+            {/* Results Banner when simulation has run */}
+            {simulationResults && (
+              <Card className="bg-gradient-to-r from-primary/10 to-accent/10 border-primary/30">
+                <CardContent className="pt-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="font-semibold text-lg">Simulation Results</h3>
+                      <p className="text-sm text-muted-foreground">
+                        Causal optimization reduces impact by {simulationResults.improvement?.vs_current || 'N/A'}%
+                      </p>
+                    </div>
+                    <Badge variant="default" className="bg-green-500">
+                      Analyzed
+                    </Badge>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+            
             <div className="grid grid-cols-3 gap-4">
               {[
-                { label: "Current Portfolio", value: currentImpact, color: "text-primary" },
-                { label: "Causal Optimized", value: causalImpact, color: "text-accent", highlight: true },
-                { label: "Traditional", value: traditionalImpact, color: "text-muted-foreground" },
+                { 
+                  label: "Current Portfolio", 
+                  value: simulationResults?.portfolio_impact_percent ?? currentImpact, 
+                  color: "text-primary",
+                  fromApi: !!simulationResults?.portfolio_impact_percent
+                },
+                { 
+                  label: "Causal Optimized", 
+                  value: simulationResults?.causal_optimized_percent ?? causalImpact, 
+                  color: "text-accent", 
+                  highlight: true,
+                  fromApi: !!simulationResults?.causal_optimized_percent
+                },
+                { 
+                  label: "Traditional", 
+                  value: simulationResults?.traditional_percent ?? traditionalImpact, 
+                  color: "text-muted-foreground",
+                  fromApi: !!simulationResults?.traditional_percent
+                },
               ].map((m) => (
                 <Card key={m.label} className={m.highlight ? "border-accent bg-accent/5" : ""}>
                   <CardContent className="pt-4 text-center">
-                    <div className="text-xs text-muted-foreground mb-1">{m.label}</div>
+                    <div className="text-xs text-muted-foreground mb-1">
+                      {m.label}
+                      {m.fromApi && <span className="ml-1 text-green-500">●</span>}
+                    </div>
                     <div className={`text-2xl font-bold ${m.value < 0 ? "text-destructive" : "text-success"}`}>
-                      {m.value > 0 ? "+" : ""}{m.value.toFixed(1)}%
+                      {m.value > 0 ? "+" : ""}{typeof m.value === 'number' ? m.value.toFixed(1) : m.value}%
                     </div>
                     {m.highlight && <Badge className="mt-2 bg-accent">Best</Badge>}
                   </CardContent>
@@ -430,13 +487,34 @@ const ScenarioSimulator = () => {
               <CardHeader><CardTitle>Recommendations</CardTitle></CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  {recommendations.map((r, i) => (
+                  {/* Use API recommendations if available, otherwise fallback to calculated */}
+                  {(simulationResults?.recommendations || recommendations).map((r: any, i: number) => (
                     <div key={i} className="flex items-center gap-3 p-3 bg-secondary/50 rounded-lg">
-                      <Badge variant={r.type === "immediate" ? "default" : "secondary"}>{r.type}</Badge>
-                      <span className="text-sm">{r.action}</span>
+                      <Badge variant={r.type === "immediate" || r.priority === "high" ? "default" : "secondary"}>
+                        {r.type || r.priority || "strategic"}
+                      </Badge>
+                      <span className="text-sm">{r.action || r.recommendation}</span>
                     </div>
                   ))}
                 </div>
+                
+                {/* Show recommended weights if simulation has run */}
+                {simulationResults?.causal_weights && Object.keys(simulationResults.causal_weights).length > 0 && (
+                  <div className="mt-4 p-3 bg-accent/10 rounded-lg border border-accent/30">
+                    <h4 className="text-sm font-medium mb-2">Recommended Causal Weights</h4>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      {Object.entries(simulationResults.causal_weights)
+                        .sort(([,a], [,b]) => (b as number) - (a as number))
+                        .map(([etf, weight]) => (
+                        <div key={etf} className="flex justify-between">
+                          <span className="text-muted-foreground">{etf}</span>
+                          <span className="font-medium">{((weight as number) * 100).toFixed(1)}%</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                
                 <Button 
                   className="w-full mt-4"
                   onClick={handleApplyToPortfolio}
@@ -445,7 +523,7 @@ const ScenarioSimulator = () => {
                   {updatePortfolioMutation.isPending ? (
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                   ) : null}
-                  Apply to Portfolio 
+                  {simulationResults?.causal_weights ? "Apply Causal Weights" : "Apply to Portfolio"}
                   <ArrowRight className="w-4 h-4 ml-2" />
                 </Button>
               </CardContent>

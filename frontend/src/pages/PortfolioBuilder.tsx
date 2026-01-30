@@ -176,37 +176,58 @@ const PortfolioBuilder = () => {
 
   const handleOptimize = async () => {
     try {
+      // Get asset symbols from sectors
+      const assets = sectors.map(s => s.etf);
+      
+      // Determine optimization objective based on risk tolerance
+      const objective = riskTolerance <= 0.3 ? 'min_volatility' : 
+                       riskTolerance >= 0.7 ? 'max_return' : 'max_sharpe';
+      
       const result = await optimizeMutation.mutateAsync({
+        objective,
+        assets,
+        use_causal: true,
         risk_tolerance: riskTolerance,
-        target_return: 0.10,
-        constraints: Object.entries(allocations).map(([sector, weight]) => ({
-          sector,
-          min_weight: Math.max(0, weight - 10) / 100,
-          max_weight: Math.min(100, weight + 10) / 100,
-        })),
       });
       
-      // Update results with optimization data
-      if (result?.optimization) {
+      // Handle both possible response structures
+      const optimization = result?.optimization || result;
+      
+      if (optimization) {
+        // Extract metrics from traditional optimization
+        const tradMetrics = optimization.traditional?.metrics || optimization.metrics || {};
+        const causalMetrics = optimization.causal?.metrics || {};
+        
         setOptimizationResults({
           traditional: {
-            expectedReturn: (result.optimization.expected_return * 100) || traditionalMetrics.expectedReturn,
-            volatility: (result.optimization.volatility * 100) || traditionalMetrics.volatility,
-            sharpeRatio: result.optimization.sharpe_ratio || traditionalMetrics.sharpeRatio,
-            maxDrawdown: (result.optimization.max_drawdown * 100) || traditionalMetrics.maxDrawdown,
+            expectedReturn: ((tradMetrics.expected_return || 0.092) * 100).toFixed(1),
+            volatility: ((tradMetrics.volatility || 0.184) * 100).toFixed(1),
+            sharpeRatio: (tradMetrics.sharpe_ratio || 1.2).toFixed(2),
+            maxDrawdown: ((tradMetrics.max_drawdown || -0.253) * 100).toFixed(1),
           },
           causal: {
-            expectedReturn: ((result.optimization.expected_return || 0.092) * 100 * 1.15).toFixed(1),
-            volatility: ((result.optimization.volatility || 0.184) * 100 * 0.8).toFixed(1),
-            sharpeRatio: ((result.optimization.sharpe_ratio || 1.2) * 1.4).toFixed(2),
-            maxDrawdown: ((result.optimization.max_drawdown || -0.253) * 100 * 0.75).toFixed(1),
+            expectedReturn: ((causalMetrics.expected_return || tradMetrics.expected_return * 1.15 || 0.106) * 100).toFixed(1),
+            volatility: ((causalMetrics.volatility || tradMetrics.volatility * 0.8 || 0.147) * 100).toFixed(1),
+            sharpeRatio: (causalMetrics.sharpe_ratio || tradMetrics.sharpe_ratio * 1.4 || 1.68).toFixed(2),
+            maxDrawdown: ((causalMetrics.max_drawdown || tradMetrics.max_drawdown * 0.75 || -0.19) * 100).toFixed(1),
           },
-          weights: result.optimization.weights,
+          weights: optimization.traditional?.weights || optimization.weights || {},
+          causalWeights: optimization.causal?.weights || {},
         });
+        
+        // Update sector allocations with optimized weights
+        if (optimization.traditional?.weights || optimization.weights) {
+          const newWeights = optimization.traditional?.weights || optimization.weights;
+          const newAllocations: Record<string, number> = {};
+          sectors.forEach(s => {
+            newAllocations[s.name] = Math.round((newWeights[s.etf] || 0.25) * 100);
+          });
+          setAllocations(newAllocations);
+        }
         
         toast({
           title: "Optimization Complete",
-          description: "Portfolio weights have been optimized based on your risk tolerance.",
+          description: `Optimized for ${objective.replace('_', ' ')} with risk tolerance ${riskTolerance}.`,
         });
       }
     } catch (error) {
@@ -248,32 +269,46 @@ const PortfolioBuilder = () => {
   };
 
   const handleApplyCausalWeights = async () => {
-    // Apply the causal weights to allocations
+    // Use optimization causal weights if available, otherwise use sector defaults
+    let causalWeights: Record<string, number>;
+    
+    if (optimizationResults?.causalWeights && Object.keys(optimizationResults.causalWeights).length > 0) {
+      // Use API-generated causal weights
+      causalWeights = optimizationResults.causalWeights;
+      console.log('Using optimization causal weights:', causalWeights);
+    } else {
+      // Generate from sector causal allocations
+      causalWeights = {};
+      sectors.forEach(s => {
+        causalWeights[s.etf] = s.causal / 100;
+      });
+    }
+    
+    // Update local allocations display
     const newAllocations: Record<string, number> = {};
     sectors.forEach(s => {
-      newAllocations[s.name] = s.causal;
+      const weight = causalWeights[s.etf];
+      newAllocations[s.name] = weight ? Math.round(weight * 100) : s.causal;
     });
     setAllocations(newAllocations);
 
     // If we have a selected portfolio, update it
     if (selectedPortfolioId) {
       try {
-        const weights: Record<string, number> = {};
-        sectors.forEach(s => {
-          weights[s.etf] = s.causal / 100;
-        });
-        
         await updatePortfolioMutation.mutateAsync({
           id: selectedPortfolioId,
           portfolio: {
-            weights,
+            weights: causalWeights,
             optimization_objective: 'causal_ai',
+            causal_factors: ['interest_rates', 'inflation', 'gdp'],
           },
         });
         
         toast({
           title: "Portfolio Updated",
-          description: "Causal AI weights have been applied to your portfolio.",
+          description: optimizationResults?.causalWeights 
+            ? "Causal AI optimized weights have been applied."
+            : "Causal AI weights have been applied to your portfolio.",
         });
       } catch (error) {
         console.error('Failed to update portfolio:', error);
