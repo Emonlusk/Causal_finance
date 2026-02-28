@@ -596,6 +596,7 @@ def detect_current_regime(
 ) -> Dict[str, Any]:
     """
     Detect current market regime from feature matrix.
+    Uses trained HMM model from registry if available.
     
     Args:
         feature_matrix: DataFrame with market data
@@ -605,6 +606,21 @@ def detect_current_regime(
         Dictionary with regime detection results
     """
     detector = MarketRegimeDetector()
+    
+    # Auto-discover trained model from registry if no explicit path given
+    if not model_path:
+        try:
+            from .ml_training_pipeline import ModelRegistry, MODELS_DIR as _MODELS_DIR
+            registry = ModelRegistry()
+            regime_info = registry.get_active_model('regime')
+            if regime_info and 'filepath' in regime_info:
+                _path = regime_info['filepath']
+                if not os.path.exists(_path):
+                    _path = os.path.join(_MODELS_DIR, os.path.basename(_path))
+                if os.path.exists(_path):
+                    model_path = _path
+        except Exception:
+            pass  # Fall through to manual fit
     
     # Load existing model if available
     if model_path and os.path.exists(model_path):

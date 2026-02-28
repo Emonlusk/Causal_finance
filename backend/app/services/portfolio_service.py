@@ -304,9 +304,12 @@ def _optimize_with_causal(
     causal_model_id: Optional[int]
 ) -> tuple:
     """
-    Optimize portfolio with causal adjustments to expected returns
+    Optimize portfolio with causal adjustments to expected returns.
+    Uses ML-trained sensitivity matrix when available.
     """
-    from app.services.causal_service import DEFAULT_SECTOR_SENSITIVITY
+    from app.services.causal_service import get_active_sensitivity_matrix
+    
+    active_matrix = get_active_sensitivity_matrix()
     
     # Get current economic conditions for causal adjustment
     # In production, this would fetch real economic data and forecasts
@@ -324,8 +327,8 @@ def _optimize_with_causal(
         sector_info = SECTOR_ETFS.get(asset, {})
         sector_key = sector_info.get('sector', '')
         
-        if sector_key in DEFAULT_SECTOR_SENSITIVITY:
-            sensitivity = DEFAULT_SECTOR_SENSITIVITY[sector_key]
+        if sector_key in active_matrix:
+            sensitivity = active_matrix[sector_key]
             
             total_adjustment = 0
             for factor, forecast in economic_forecast.items():

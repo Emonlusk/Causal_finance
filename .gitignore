@@ -49,15 +49,16 @@ instance/
 backend/instance/
 
 # ----- ML MODELS (large files) -----
-*.pkl
-*.joblib
-*.h5
-*.pt
-*.pth
+# Allow trained models to be tracked in git
+# *.pkl
+# *.joblib
+# *.h5
+# *.pt
+# *.pth
 *.onnx
-data/models/*.pkl
-data/models/*.joblib
-backend/data/models/
+# data/models/*.pkl
+# data/models/*.joblib
+# backend/data/models/
 
 # ----- NODE.JS -----
 node_modules/

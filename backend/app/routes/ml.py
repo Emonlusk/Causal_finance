@@ -14,6 +14,8 @@ from flask import Blueprint, jsonify, request, current_app
 from datetime import datetime
 import logging
 import os
+import threading
+import uuid
 
 # Import ML services
 from ..services.ml_training_pipeline import (
@@ -35,6 +37,9 @@ ml_bp = Blueprint('ml', __name__, url_prefix='/api/ml')
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
 
+# Track async training jobs
+_training_jobs = {}
+
 
 # ============================================
 # TRAINING ENDPOINTS
@@ -43,7 +48,7 @@ DATA_DIR = os.path.join(BASE_DIR, 'data')
 @ml_bp.route('/train', methods=['POST'])
 def start_training():
     """
-    Start model training pipeline.
+    Start model training pipeline asynchronously in a background thread.
     
     Request body:
     {
@@ -54,7 +59,7 @@ def start_training():
     }
     
     Returns:
-        Training job status
+        Training job ID for status polling
     """
     try:
         data = request.get_json() or {}
@@ -67,30 +72,50 @@ def start_training():
         # Get pipeline
         pipeline = get_training_pipeline(fred_api_key=fred_api_key)
         
-        # Start training (synchronous for now)
-        # TODO: Make async with Celery/Redis
-        result = pipeline.run_full_pipeline(
-            start_date=start_date,
-            end_date=end_date,
-            skip_data_fetch=skip_data_fetch
-        )
+        # Create job ID
+        job_id = str(uuid.uuid4())[:8]
+        _training_jobs[job_id] = {
+            'status': 'running',
+            'started_at': datetime.now().isoformat(),
+            'completed_at': None,
+            'result': None,
+            'error': None
+        }
         
-        if 'error' in result:
-            return jsonify({
-                'success': False,
-                'error': result['error']
-            }), 500
+        # Run training in background thread
+        def run_training():
+            try:
+                result = pipeline.run_full_pipeline(
+                    start_date=start_date,
+                    end_date=end_date,
+                    skip_data_fetch=skip_data_fetch
+                )
+                if 'error' in result:
+                    _training_jobs[job_id]['status'] = 'failed'
+                    _training_jobs[job_id]['error'] = result['error']
+                else:
+                    _training_jobs[job_id]['status'] = 'completed'
+                    _training_jobs[job_id]['result'] = {
+                        'pipeline_id': result.get('pipeline_id'),
+                        'causal': bool(result.get('causal')),
+                        'treatment': bool(result.get('treatment')),
+                        'forecasting': bool(result.get('forecasting')),
+                        'regime': bool(result.get('regime')),
+                    }
+            except Exception as e:
+                logger.error(f"Background training failed: {e}")
+                _training_jobs[job_id]['status'] = 'failed'
+                _training_jobs[job_id]['error'] = str(e)
+            finally:
+                _training_jobs[job_id]['completed_at'] = datetime.now().isoformat()
+        
+        thread = threading.Thread(target=run_training, daemon=True)
+        thread.start()
         
         return jsonify({
             'success': True,
-            'pipeline_id': result.get('pipeline_id'),
-            'message': 'Training completed successfully',
-            'results': {
-                'causal': bool(result.get('causal')),
-                'treatment': bool(result.get('treatment')),
-                'forecasting': bool(result.get('forecasting')),
-                'regime': bool(result.get('regime')),
-            }
+            'job_id': job_id,
+            'message': 'Training started in background. Poll /api/ml/train/job/<job_id> for status.',
         })
         
     except Exception as e:
@@ -99,6 +124,15 @@ def start_training():
             'success': False,
             'error': str(e)
         }), 500
+
+
+@ml_bp.route('/train/job/<job_id>', methods=['GET'])
+def get_training_job_status(job_id):
+    """Get the status of an async training job."""
+    job = _training_jobs.get(job_id)
+    if not job:
+        return jsonify({'success': False, 'error': 'Job not found'}), 404
+    return jsonify({'success': True, **job})
 
 
 @ml_bp.route('/train/status', methods=['GET'])

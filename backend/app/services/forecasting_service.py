@@ -371,8 +371,14 @@ class GARCHForecaster:
             joblib.dump(self.model, filepath)
     
     def load(self, filepath: str):
-        """Load fitted model."""
-        self.model = joblib.load(filepath)
+        """Load fitted model. Handles both raw model and dict-wrapped format."""
+        data = joblib.load(filepath)
+        # Colab notebook saves as {'model': fit, 'vol_type': ..., ...}
+        # Backend save() saves the raw model directly
+        if isinstance(data, dict) and 'model' in data:
+            self.model = data['model']
+        else:
+            self.model = data
 
 
 class LSTMForecaster:
@@ -624,13 +630,16 @@ class LSTMForecaster:
         return {'method': 'ridge_regression', 'n_features': X_flat.shape[1]}
     
     def save(self, filepath: str):
-        """Save model and scaler."""
+        """Save model, scaler, and config including input_size for reconstruction."""
         import torch
         if self.model is not None:
+            # Infer input_size from the first LSTM weight matrix
+            input_size = self.model.lstm.weight_ih_l0.shape[1]
             torch.save({
                 'model_state': self.model.state_dict(),
                 'scaler': self.scaler,
                 'config': {
+                    'input_size': input_size,
                     'hidden_size': self.hidden_size,
                     'num_layers': self.num_layers,
                     'dropout': self.dropout,
@@ -639,14 +648,29 @@ class LSTMForecaster:
             }, filepath)
     
     def load(self, filepath: str):
-        """Load model and scaler."""
+        """Load model, scaler, and rebuild model architecture."""
         import torch
-        data = torch.load(filepath)
+        data = torch.load(filepath, map_location='cpu')
         self.scaler = data['scaler']
         config = data['config']
         self.hidden_size = config['hidden_size']
         self.num_layers = config['num_layers']
-        # Need to rebuild model with correct input size
+        self.dropout = config.get('dropout', 0.2)
+        self.sequence_length = config.get('sequence_length', 60)
+        
+        # Rebuild model architecture using saved input_size
+        input_size = config.get('input_size')
+        if input_size is None:
+            # Fallback: infer from state dict weight shape
+            weight_key = 'lstm.weight_ih_l0'
+            if weight_key in data['model_state']:
+                input_size = data['model_state'][weight_key].shape[1]
+            else:
+                raise ValueError("Cannot determine input_size for LSTM model reconstruction")
+        
+        self.model = self._build_model(input_size)
+        self.model.load_state_dict(data['model_state'])
+        self.model.eval()
 
 
 class EnsembleForecaster:

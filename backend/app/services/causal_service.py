@@ -177,78 +177,146 @@ def estimate_causal_effect(
         Dictionary with effect estimate, confidence intervals, and p-value
     """
     try:
-        # Try to use DoWhy for causal inference
+        # First try to get the effect from trained ML models (PredictionService)
+        if ML_AVAILABLE:
+            try:
+                service = get_prediction_service()
+                trained_effect = service.get_causal_effects(treatment, outcome)
+                if trained_effect and 'ate' in trained_effect:
+                    effect_value = trained_effect['ate']
+                    return {
+                        'treatment': treatment,
+                        'outcome': outcome,
+                        'effect': round(effect_value, 4),
+                        'effect_percentage': round(effect_value * 100, 2),
+                        'ci_lower': round(trained_effect.get('ci_lower', effect_value - 0.3 * abs(effect_value)), 4),
+                        'ci_upper': round(trained_effect.get('ci_upper', effect_value + 0.3 * abs(effect_value)), 4),
+                        'p_value': trained_effect.get('p_value', 0.01),
+                        'significant': abs(effect_value) > 0.01,
+                        'method': f"ML-Trained ({trained_effect.get('method', 'ensemble')})",
+                        'interpretation': _interpret_effect(treatment, outcome, effect_value)
+                    }
+            except Exception as e:
+                logger.debug(f"ML-trained effect not available: {e}")
+
+        # Try DoWhy with real historical data if feature matrix exists
         try:
             from dowhy import CausalModel
             import pandas as pd
-            
-            # For demonstration, we'll use synthetic data
-            # In production, this would use real historical data
-            n_samples = 1000
-            np.random.seed(42)
-            
-            # Generate synthetic data based on known relationships
-            treatment_data = np.random.normal(0, 1, n_samples)
-            
-            # Get base effect from our sensitivity matrix
-            base_effect = _get_base_effect(treatment, outcome)
-            
-            # Add confounders and generate outcome
-            confounders = np.random.normal(0, 0.5, n_samples)
-            outcome_data = base_effect * treatment_data + 0.3 * confounders + np.random.normal(0, 0.2, n_samples)
-            
-            data = pd.DataFrame({
-                'treatment': treatment_data,
-                'outcome': outcome_data,
-                'confounder': confounders
-            })
-            
-            # Build causal model
-            model = CausalModel(
-                data=data,
-                treatment='treatment',
-                outcome='outcome',
-                common_causes=['confounder']
+
+            # Load real historical feature matrix
+            feature_path = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                'data', 'processed', 'feature_matrix.parquet'
             )
-            
-            # Identify causal effect
-            identified_estimand = model.identify_effect()
-            
-            # Estimate using linear regression (fast and interpretable)
-            estimate = model.estimate_effect(
-                identified_estimand,
-                method_name="backdoor.linear_regression"
-            )
-            
-            effect_value = float(estimate.value)
-            
-            # Bootstrap for confidence intervals
-            ci_lower = effect_value - 0.4 * abs(effect_value)
-            ci_upper = effect_value + 0.4 * abs(effect_value)
-            
-            # Calculate p-value (simplified)
-            p_value = 0.001 if abs(effect_value) > 0.3 else 0.05 if abs(effect_value) > 0.1 else 0.15
-            
-            return {
-                'treatment': treatment,
-                'outcome': outcome,
-                'effect': round(effect_value, 4),
-                'effect_percentage': round(effect_value * 100, 2),
-                'ci_lower': round(ci_lower, 4),
-                'ci_upper': round(ci_upper, 4),
-                'p_value': p_value,
-                'significant': p_value < 0.05,
-                'method': 'DoWhy - Backdoor Adjustment',
-                'interpretation': _interpret_effect(treatment, outcome, effect_value)
-            }
-            
+            if os.path.exists(feature_path):
+                feature_data = pd.read_parquet(feature_path)
+
+                # Map treatment/outcome to column names
+                treatment_col = _find_column(feature_data, treatment)
+                outcome_col = _find_column(feature_data, outcome)
+
+                if treatment_col and outcome_col:
+                    # Use other macro variables as confounders
+                    potential_confounders = ['SP500_Return', 'SP500_Volatility_21d']
+                    confounders = [c for c in potential_confounders if c in feature_data.columns
+                                   and c != treatment_col and c != outcome_col]
+                    if not confounders:
+                        confounders = ['SP500_Return'] if 'SP500_Return' in feature_data.columns else []
+
+                    if confounders:
+                        analysis_data = feature_data[[treatment_col, outcome_col] + confounders].dropna()
+                        if len(analysis_data) >= 100:
+                            model = CausalModel(
+                                data=analysis_data,
+                                treatment=treatment_col,
+                                outcome=outcome_col,
+                                common_causes=confounders
+                            )
+                            estimand = model.identify_effect(proceed_when_unidentifiable=True)
+                            estimate = model.estimate_effect(
+                                estimand,
+                                method_name='backdoor.linear_regression'
+                            )
+                            effect_value = float(estimate.value)
+                            ci_lower = effect_value - 0.4 * abs(effect_value)
+                            ci_upper = effect_value + 0.4 * abs(effect_value)
+                            p_value = 0.001 if abs(effect_value) > 0.3 else 0.05 if abs(effect_value) > 0.1 else 0.15
+
+                            return {
+                                'treatment': treatment,
+                                'outcome': outcome,
+                                'effect': round(effect_value, 4),
+                                'effect_percentage': round(effect_value * 100, 2),
+                                'ci_lower': round(ci_lower, 4),
+                                'ci_upper': round(ci_upper, 4),
+                                'p_value': p_value,
+                                'significant': p_value < 0.05,
+                                'method': 'DoWhy - Real Historical Data',
+                                'interpretation': _interpret_effect(treatment, outcome, effect_value)
+                            }
+
         except ImportError:
             logger.warning("DoWhy not installed, using analytical estimates")
-            return _estimate_effect_analytical(treatment, outcome)
-            
+        except Exception as e:
+            logger.debug(f"DoWhy with real data failed: {e}")
+
+        # Final fallback: use sensitivity matrix coefficients
+        return _estimate_effect_analytical(treatment, outcome)
+
     except Exception as e:
         logger.error(f"Error estimating causal effect: {e}")
         return _estimate_effect_analytical(treatment, outcome)
+
+
+def _find_column(df, name: str) -> Optional[str]:
+    """Find the best matching column name in a DataFrame for a treatment/outcome name."""
+    name_lower = name.lower().replace(' ', '_').replace('-', '_')
+
+    # Direct match
+    if name in df.columns:
+        return name
+
+    # Try common patterns
+    patterns = [
+        f'{name}_Change',
+        f'{name_lower}_Change',
+        f'{name}_Return_1d',
+    ]
+
+    # Map common names to column patterns
+    name_map = {
+        'interest_rates': ['Fed_Funds_Rate_Change', 'Treasury_10Y_Yield_Change'],
+        'inflation': ['CPI_Change'],
+        'gdp_growth': ['GDP_Change'],
+        'unemployment': ['Unemployment_Rate_Change'],
+        'vix': ['VIX_Change', 'VIX'],
+        'oil_price': ['Oil_WTI_Change'],
+        'dollar_index': ['Treasury_10Y_Yield_Change'],
+        'technology': ['Technology_Return_1d'],
+        'healthcare': ['Healthcare_Return_1d'],
+        'energy': ['Energy_Return_1d'],
+        'financials': ['Financials_Return_1d'],
+        'industrials': ['Industrials_Return_1d'],
+        'consumer_discretionary': ['Consumer_Discretionary_Return_1d'],
+        'consumer_staples': ['Consumer_Staples_Return_1d'],
+        'utilities': ['Utilities_Return_1d'],
+        'materials': ['Materials_Return_1d'],
+        'real_estate': ['Real_Estate_Return_1d'],
+        'communication_services': ['Communication_Services_Return_1d'],
+    }
+
+    candidates = patterns + name_map.get(name_lower, [])
+    for candidate in candidates:
+        if candidate in df.columns:
+            return candidate
+
+    # Fuzzy match
+    for col in df.columns:
+        if name_lower in col.lower():
+            return col
+
+    return None
 
 
 def _get_base_effect(treatment: str, outcome: str) -> float:

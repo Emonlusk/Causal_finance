@@ -10,7 +10,8 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 # Import causal sensitivity data
-from app.services.causal_service import DEFAULT_SECTOR_SENSITIVITY
+# Use get_active_sensitivity_matrix() to prefer trained ML models over hardcoded defaults
+from app.services.causal_service import DEFAULT_SECTOR_SENSITIVITY, get_active_sensitivity_matrix
 
 # Sector ETF to sector key mapping
 SECTOR_ETF_MAP = {
@@ -113,11 +114,15 @@ def run_scenario_simulation(
 
 def _calculate_sector_impacts(parameters: Dict[str, Dict]) -> Dict[str, float]:
     """
-    Calculate the impact on each sector based on economic changes
+    Calculate the impact on each sector based on economic changes.
+    Uses trained ML sensitivity matrix if available, otherwise falls back to defaults.
     """
     sector_impacts = {}
     
-    for sector, sensitivities in DEFAULT_SECTOR_SENSITIVITY.items():
+    # Use trained ML matrix when available, fall back to hardcoded defaults
+    active_matrix = get_active_sensitivity_matrix()
+    
+    for sector, sensitivities in active_matrix.items():
         total_impact = 0
         
         for factor, params in parameters.items():

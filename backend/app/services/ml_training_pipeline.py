@@ -407,16 +407,19 @@ class MLTrainingPipeline:
         available_macro = [c for c in macro_cols if c in train_data.columns]
         
         if available_macro and sector_cols:
+            # Extract sector names from column names (e.g. 'Technology_Return_1d' -> 'Technology')
+            sector_names = [c.replace('_Return_1d', '') for c in sector_cols]
+
             effects_matrix = estimator.estimate_macro_sector_effects(
                 train_data,
-                macro_vars=available_macro,
-                sector_vars=sector_cols
+                sectors=sector_names,
+                macro_treatments=[f'{m}_Change' if not m.endswith('_Change') else m for m in available_macro]
             )
             results['macro_sector_effects'] = effects_matrix
             
-            # Build sensitivity matrix
+            # Build sensitivity matrix from estimated effects
             sensitivity_matrix = estimator.build_sensitivity_matrix(
-                train_data, available_macro, sector_cols
+                effects_matrix
             )
             results['sensitivity_matrix'] = sensitivity_matrix
             
@@ -639,12 +642,27 @@ class PredictionService:
             return None
         
         filepath = model_info['filepath']
-        if os.path.exists(filepath):
+        
+        # Resolve path: try as-is, then MODELS_DIR/filepath, then MODELS_DIR/basename
+        if not os.path.exists(filepath):
+            candidates = [
+                os.path.join(MODELS_DIR, filepath),
+                os.path.join(MODELS_DIR, os.path.basename(filepath)),
+            ]
+            resolved = next((c for c in candidates if os.path.exists(c)), None)
+            if resolved:
+                filepath = resolved
+            else:
+                logger.warning(f"Model file not found: {filepath} (tried: {candidates})")
+                return None
+        
+        try:
             model = joblib.load(filepath)
             self._loaded_models[model_type] = model
             return model
-        
-        return None
+        except Exception as e:
+            logger.error(f"Failed to load model {model_type}: {e}")
+            return None
     
     def predict_sector_returns(
         self,
@@ -668,7 +686,11 @@ class PredictionService:
         if not forecast_info:
             return self._fallback_prediction(recent_data, horizon)
         
-        models_dir = forecast_info.get('filepath', MODELS_DIR)
+        # Always use MODELS_DIR for glob — registry path may be stale or from another machine
+        models_dir = MODELS_DIR
+        raw_path = forecast_info.get('filepath', '')
+        if os.path.isdir(raw_path):
+            models_dir = raw_path
         
         # Try ARIMA first
         arima_path = os.path.join(models_dir, f'arima_{sector}_*.pkl')
@@ -742,10 +764,20 @@ class PredictionService:
         """
         model_info = self.registry.get_active_model('regime')
         
-        if model_info and os.path.exists(model_info.get('filepath', '')):
-            detector = MarketRegimeDetector()
-            detector.load(model_info['filepath'])
-            return detector.predict_regime(recent_returns, recent_volatility)
+        if model_info:
+            filepath = model_info.get('filepath', '')
+            # Resolve path: try as-is, then MODELS_DIR/filepath, then MODELS_DIR/basename
+            if not os.path.exists(filepath):
+                candidates = [
+                    os.path.join(MODELS_DIR, filepath),
+                    os.path.join(MODELS_DIR, os.path.basename(filepath)),
+                ]
+                filepath = next((c for c in candidates if os.path.exists(c)), filepath)
+            
+            if os.path.exists(filepath):
+                detector = MarketRegimeDetector()
+                detector.load(filepath)
+                return detector.predict_regime(recent_returns, recent_volatility)
         
         # Fallback
         detector = MarketRegimeDetector()
