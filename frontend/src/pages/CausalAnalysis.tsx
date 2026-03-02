@@ -79,12 +79,12 @@ const factorExplanations: Record<string, { name: string; description: string; im
     description: "A measure of expected market turbulence - the 'fear gauge'",
     impact: "High VIX means investors are fearful. Low VIX means calm markets.",
   },
-  oil_prices: {
+  oil_price: {
     name: "Oil Prices",
     description: "The cost of crude oil, affecting energy and transportation",
     impact: "High oil prices hurt consumers and most stocks, but benefit energy companies.",
   },
-  dollar_strength: {
+  dollar_index: {
     name: "US Dollar Strength",
     description: "How strong the dollar is compared to other currencies",
     impact: "A strong dollar hurts exporters but helps importers and keeps inflation low.",
@@ -140,7 +140,7 @@ const CausalAnalysis = () => {
     // If it's an array format (matrix: [{sector, interest_rates, inflation...}])
     if (rawMatrix?.matrix && Array.isArray(rawMatrix.matrix)) {
       const result: Record<string, Record<string, number>> = {};
-      const factorKeys = ['interest_rates', 'inflation', 'gdp_growth', 'unemployment', 'vix', 'oil_prices'];
+      const factorKeys = ['interest_rates', 'inflation', 'gdp_growth', 'unemployment', 'vix', 'oil_price', 'dollar_index'];
       
       factorKeys.forEach(factor => {
         result[factor] = {};
@@ -202,7 +202,7 @@ const CausalAnalysis = () => {
         'Consumer Discretionary': -0.45,
         'Utilities': -0.15,
       },
-      oil_prices: {
+      oil_price: {
         'Technology': -0.15,
         'Healthcare': -0.10,
         'Energy': 0.70,
@@ -245,7 +245,7 @@ const CausalAnalysis = () => {
           const sensitivity = sensitivityMatrix[selectedFactor]?.[sector] || 0;
           effects[sector] = {
             ate: sensitivity * whatIfChange * 0.01,
-            confidence: 0.85 + Math.random() * 0.10,
+            confidence: Math.min(0.95, 0.85 + Math.abs(sensitivity) * 0.1),
           };
         }
       }
@@ -263,7 +263,7 @@ const CausalAnalysis = () => {
         const sensitivity = sensitivityMatrix[selectedFactor]?.[sector] || 0;
         fallbackEffects[sector] = {
           ate: sensitivity * whatIfChange * 0.01,
-          confidence: 0.85 + Math.random() * 0.10,
+          confidence: Math.min(0.95, 0.85 + Math.abs(sensitivity) * 0.1),
         };
       });
       setWhatIfResults({ effects: fallbackEffects });

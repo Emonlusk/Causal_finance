@@ -431,11 +431,7 @@ def get_portfolio_holdings(portfolio_id):
                 current_price = info.get('regularMarketPrice', 0) or info.get('currentPrice', 0)
                 previous_close = info.get('previousClose', 0) or info.get('regularMarketPreviousClose', 0)
                 
-                # Add small random variation for live feel (simulates real-time ticks)
-                variation = random.uniform(-0.002, 0.002)  # ±0.2% variation
-                if current_price:
-                    current_price = current_price * (1 + variation)
-                else:
+                if not current_price:
                     current_price = data.get('avg_cost', 0)
                 
                 shares = data.get('shares', 0)

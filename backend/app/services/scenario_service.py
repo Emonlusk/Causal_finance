@@ -330,7 +330,7 @@ def get_regime_analysis(portfolio_weights: Dict[str, float]) -> Dict[str, Any]:
         'rate_hike': {'interest_rates': {'change': 0.02}, 'inflation': {'change': 0.01}},
         'inflation_spike': {'inflation': {'change': 0.04}, 'gdp_growth': {'change': -0.005}},
         'recession': {'gdp_growth': {'change': -0.03}, 'unemployment': {'change': 0.02}},
-        'bull_market': {'gdp_growth': {'change': 0.04}, 'vix': {'change': -5}}
+        'bull_market': {'gdp_growth': {'change': 0.04}, 'vix': {'change': -0.25}}
     }
     
     regime_results = {}

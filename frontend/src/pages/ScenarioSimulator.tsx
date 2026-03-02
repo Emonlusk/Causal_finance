@@ -80,7 +80,7 @@ const ScenarioSimulator = () => {
       coeffs[sectorKey] = {
         rates: item.interest_rates || 0,
         inflation: item.inflation || 0,
-        gdp: item.gdp || 0,
+        gdp: item.gdp_growth || item.gdp || 0,
       };
     });
     
@@ -103,37 +103,69 @@ const ScenarioSimulator = () => {
     );
   }, [rates, inflation, gdp, sensitivityCoefficients]);
 
-  const causalImpact = currentImpact * 0.5; // Causal optimization reduces impact by ~50%
-  const traditionalImpact = currentImpact * 1.8; // Traditional methods have higher exposure
+  // Causal impact: reduce weight on worst-impacted sector by 30%, redistribute to best
+  const causalImpact = useMemo(() => {
+    const c = sensitivityCoefficients;
+    const sectorImpacts = [
+      { impact: c.tech.rates * rates + c.tech.inflation * inflation + c.tech.gdp * gdp, weight: 0.35 },
+      { impact: c.health.rates * rates + c.health.inflation * inflation + c.health.gdp * gdp, weight: 0.25 },
+      { impact: c.energy.rates * rates + c.energy.inflation * inflation + c.energy.gdp * gdp, weight: 0.15 },
+      { impact: c.finance.rates * rates + c.finance.inflation * inflation + c.finance.gdp * gdp, weight: 0.25 },
+    ];
+    // Shift weight from worst sector to best sector
+    const sorted = [...sectorImpacts].sort((a, b) => a.impact - b.impact);
+    const adjusted = sectorImpacts.map(s => {
+      let w = s.weight;
+      if (s === sorted[0] && w > 0.05) w -= w * 0.3; // Reduce worst by 30%
+      if (s === sorted[sorted.length - 1]) w += sorted[0].weight * 0.3; // Add to best
+      return s.impact * w;
+    });
+    return adjusted.reduce((sum, v) => sum + v, 0);
+  }, [rates, inflation, gdp, sensitivityCoefficients]);
+
+  // Traditional: equal-weight across sectors
+  const traditionalImpact = useMemo(() => {
+    const c = sensitivityCoefficients;
+    const impacts = [
+      c.tech.rates * rates + c.tech.inflation * inflation + c.tech.gdp * gdp,
+      c.health.rates * rates + c.health.inflation * inflation + c.health.gdp * gdp,
+      c.energy.rates * rates + c.energy.inflation * inflation + c.energy.gdp * gdp,
+      c.finance.rates * rates + c.finance.inflation * inflation + c.finance.gdp * gdp,
+    ];
+    return impacts.reduce((sum, v) => sum + v * 0.25, 0);
+  }, [rates, inflation, gdp, sensitivityCoefficients]);
 
   const sectorData = useMemo(() => {
     const c = sensitivityCoefficients;
-    return [
-      { 
-        sector: "Tech", 
-        current: c.tech.rates * rates + c.tech.inflation * inflation + c.tech.gdp * gdp,
-        causal: (c.tech.rates * rates + c.tech.inflation * inflation + c.tech.gdp * gdp) * 0.5,
-        traditional: (c.tech.rates * rates + c.tech.inflation * inflation + c.tech.gdp * gdp) * 1.8
-      },
-      { 
-        sector: "Health", 
-        current: c.health.rates * rates + c.health.inflation * inflation + c.health.gdp * gdp,
-        causal: (c.health.rates * rates + c.health.inflation * inflation + c.health.gdp * gdp) * 0.5,
-        traditional: (c.health.rates * rates + c.health.inflation * inflation + c.health.gdp * gdp) * 1.8
-      },
-      { 
-        sector: "Energy", 
-        current: c.energy.rates * rates + c.energy.inflation * inflation + c.energy.gdp * gdp,
-        causal: (c.energy.rates * rates + c.energy.inflation * inflation + c.energy.gdp * gdp) * 0.5,
-        traditional: (c.energy.rates * rates + c.energy.inflation * inflation + c.energy.gdp * gdp) * 1.8
-      },
-      { 
-        sector: "Finance", 
-        current: c.finance.rates * rates + c.finance.inflation * inflation + c.finance.gdp * gdp,
-        causal: (c.finance.rates * rates + c.finance.inflation * inflation + c.finance.gdp * gdp) * 0.5,
-        traditional: (c.finance.rates * rates + c.finance.inflation * inflation + c.finance.gdp * gdp) * 1.8
-      },
+    const sectors = [
+      { key: 'tech', label: 'Tech', c: c.tech, baseW: 0.35 },
+      { key: 'health', label: 'Health', c: c.health, baseW: 0.25 },
+      { key: 'energy', label: 'Energy', c: c.energy, baseW: 0.15 },
+      { key: 'finance', label: 'Finance', c: c.finance, baseW: 0.25 },
     ];
+
+    // Calculate raw impacts
+    const withImpact = sectors.map(s => ({
+      ...s,
+      rawImpact: s.c.rates * rates + s.c.inflation * inflation + s.c.gdp * gdp,
+    }));
+
+    // Causal: shift weight from worst to best sector
+    const sorted = [...withImpact].sort((a, b) => a.rawImpact - b.rawImpact);
+    const worstKey = sorted[0].key;
+    const bestKey = sorted[sorted.length - 1].key;
+
+    return withImpact.map(s => {
+      let causalW = s.baseW;
+      if (s.key === worstKey && causalW > 0.05) causalW -= causalW * 0.3;
+      if (s.key === bestKey) causalW += sorted[0].baseW * 0.3;
+      return {
+        sector: s.label,
+        current: s.rawImpact,
+        causal: s.rawImpact * (causalW / s.baseW), // Weighted impact
+        traditional: s.rawImpact, // Equal-weight means same sector impact
+      };
+    });
   }, [rates, inflation, gdp, sensitivityCoefficients]);
 
   const applyPreset = (preset: typeof presetScenarios[0]) => {
@@ -157,9 +189,9 @@ const ScenarioSimulator = () => {
       const result = await runScenarioMutation.mutateAsync({
         name: `Scenario ${new Date().toLocaleTimeString()}`,
         parameters: {
-          interest_rates: { change: rates / 100 },  // Convert % to decimal
+          interest_rates: { change: rates / 100 },
           inflation: { change: inflation / 100 },
-          gdp: { change: gdp / 100 },
+          gdp_growth: { change: gdp / 100 },
         },
         portfolio_id: selectedPortfolioId,
         save_results: false,
@@ -185,9 +217,9 @@ const ScenarioSimulator = () => {
         name: `Custom Scenario ${new Date().toLocaleDateString()}`,
         description: `Rates: ${rates > 0 ? '+' : ''}${rates}%, Inflation: ${inflation > 0 ? '+' : ''}${inflation}%, GDP: ${gdp > 0 ? '+' : ''}${gdp}%`,
         parameters: {
-          interest_rates: rates,
-          inflation: inflation,
-          gdp: gdp,
+          interest_rates: { change: rates / 100 },
+          inflation: { change: inflation / 100 },
+          gdp_growth: { change: gdp / 100 },
         },
       });
       toast({
@@ -228,7 +260,7 @@ const ScenarioSimulator = () => {
           parameters: {
             interest_rates: { change: rates / 100 },
             inflation: { change: inflation / 100 },
-            gdp: { change: gdp / 100 },
+            gdp_growth: { change: gdp / 100 },
           },
           portfolio_id: selectedPortfolioId,
           save_results: false,
@@ -488,14 +520,28 @@ const ScenarioSimulator = () => {
               <CardContent>
                 <div className="space-y-3">
                   {/* Use API recommendations if available, otherwise fallback to calculated */}
-                  {(simulationResults?.recommendations || recommendations).map((r: any, i: number) => (
+                  {(() => {
+                    let displayRecs = recommendations;
+                    if (simulationResults?.recommendations) {
+                      const apiRecs = simulationResults.recommendations;
+                      if (Array.isArray(apiRecs)) {
+                        displayRecs = apiRecs;
+                      } else if (typeof apiRecs === 'object') {
+                        displayRecs = [
+                          ...(apiRecs.immediate || []).map((r: any) => ({ ...r, action: r.action || r.recommendation, type: 'immediate' })),
+                          ...(apiRecs.strategic || []).map((r: any) => ({ ...r, action: r.action || r.strategy || r.recommendation, type: 'strategic' })),
+                        ];
+                      }
+                    }
+                    return displayRecs.map((r: any, i: number) => (
                     <div key={i} className="flex items-center gap-3 p-3 bg-secondary/50 rounded-lg">
                       <Badge variant={r.type === "immediate" || r.priority === "high" ? "default" : "secondary"}>
                         {r.type || r.priority || "strategic"}
                       </Badge>
                       <span className="text-sm">{r.action || r.recommendation}</span>
                     </div>
-                  ))}
+                  ));
+                  })()}
                 </div>
                 
                 {/* Show recommended weights if simulation has run */}

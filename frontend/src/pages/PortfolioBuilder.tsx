@@ -75,13 +75,19 @@ const PortfolioBuilder = () => {
       return defaultSectors;
     }
 
-    const colors = ["bg-primary", "bg-success", "bg-warning", "bg-accent"];
-    const etfs = ["XLK", "XLV", "XLE", "XLF"];
+    const colors = ["bg-primary", "bg-success", "bg-warning", "bg-accent", "bg-blue-500", "bg-purple-500", "bg-orange-500", "bg-pink-500", "bg-teal-500", "bg-cyan-500", "bg-indigo-500"];
+    const sectorToEtf: Record<string, string> = {
+      'Technology': 'XLK', 'Healthcare': 'XLV', 'Energy': 'XLE',
+      'Financials': 'XLF', 'Industrials': 'XLI', 'Consumer Discretionary': 'XLY',
+      'Consumer Staples': 'XLP', 'Utilities': 'XLU', 'Materials': 'XLB',
+      'Real Estate': 'XLRE', 'Communication Services': 'XLC',
+    };
     return matrix.slice(0, 4).map((item: any, index: number) => {
       const name = item.sector?.replace(/_/g, ' ')
         ?.split(' ')
         ?.map((word: string) => word.charAt(0).toUpperCase() + word.slice(1))
         ?.join(' ') || `Sector ${index + 1}`;
+      const etf = sectorToEtf[name] || ['XLK', 'XLV', 'XLE', 'XLF'][index % 4];
       
       // Calculate causal weights based on rate sensitivity
       const rateSensitivity = Math.abs(item.interest_rates || 0);
@@ -93,7 +99,7 @@ const PortfolioBuilder = () => {
         traditional: baseWeight,
         causal: Math.max(5, Math.min(50, baseWeight + causalAdjustment)),
         color: colors[index % colors.length],
-        etf: etfs[index % etfs.length],
+        etf,
       };
     });
   }, [sensitivityData]);
@@ -124,14 +130,15 @@ const PortfolioBuilder = () => {
     if (optimizationResults?.causal) {
       return optimizationResults.causal;
     }
-    const improvement = sensitivityData?.sensitivity_matrix?.is_ml_trained ? 1.2 : 1.0;
+    // Before optimization: show same as traditional with a note
     return {
-      expectedReturn: +(traditionalMetrics.expectedReturn * improvement).toFixed(1),
-      volatility: +(traditionalMetrics.volatility * 0.77).toFixed(1),
-      sharpeRatio: +(traditionalMetrics.sharpeRatio * 1.5).toFixed(1),
-      maxDrawdown: +(traditionalMetrics.maxDrawdown * 0.73).toFixed(1),
+      expectedReturn: traditionalMetrics.expectedReturn,
+      volatility: traditionalMetrics.volatility,
+      sharpeRatio: traditionalMetrics.sharpeRatio,
+      maxDrawdown: traditionalMetrics.maxDrawdown,
+      notOptimized: true,
     };
-  }, [traditionalMetrics, sensitivityData, optimizationResults]);
+  }, [traditionalMetrics, optimizationResults]);
 
   // Generate causal reasons from sensitivity data
   const causalReasons = useMemo(() => {
@@ -148,7 +155,7 @@ const PortfolioBuilder = () => {
     return matrix.slice(0, 4).map((item: any) => ({
       factor: `${item.sector?.replace(/_/g, ' ')} Sensitivity`,
       insight: `Rate sensitivity: ${item.interest_rates?.toFixed(2) || 0}, adjusted allocation accordingly`,
-      confidence: Math.floor(Math.random() * 15) + 85,
+      confidence: Math.min(99, Math.floor(80 + Math.abs(item.interest_rates || 0) * 20)),
     }));
   }, [sensitivityData]);
 
@@ -160,11 +167,32 @@ const PortfolioBuilder = () => {
       ? currentRegimeRaw 
       : currentRegimeRaw?.current_regime || 'normal';
     
+    // Compute regime impacts from sensitivity matrix
+    const matrixData = sensitivityData?.sensitivity_matrix?.matrix;
+    const computeRegimeImpact = (params: Record<string, number>) => {
+      if (!matrixData || !Array.isArray(matrixData)) return { traditional: 0, causal: 0 };
+      let tradTotal = 0;
+      let causalTotal = 0;
+      const n = Math.min(matrixData.length, 4);
+      const equalW = 1 / n;
+      matrixData.slice(0, n).forEach((item: any) => {
+        let sectorImpact = 0;
+        Object.entries(params).forEach(([factor, change]) => {
+          sectorImpact += (item[factor] || 0) * change;
+        });
+        tradTotal += sectorImpact * equalW;
+        // Causal: reduce allocation to high-negative-impact sectors heuristically
+        const causalW = sectorImpact < -0.02 ? equalW * 0.7 : sectorImpact > 0.02 ? equalW * 1.3 : equalW;
+        causalTotal += sectorImpact * causalW;
+      });
+      return { traditional: +(tradTotal * 100).toFixed(1), causal: +(causalTotal * 100).toFixed(1) };
+    };
+    
     const regimes = [
-      { regime: "Rate Hike", traditional: -8.2, causal: -3.5 },
-      { regime: "Inflation Spike", traditional: -5.1, causal: 1.8 },
-      { regime: "Recession", traditional: -12.3, causal: -7.9 },
-      { regime: "Bull Market", traditional: 15.4, causal: 16.2 },
+      { regime: 'Rate Hike', ...computeRegimeImpact({ interest_rates: 0.02, inflation: 0.01 }) },
+      { regime: 'Inflation Spike', ...computeRegimeImpact({ inflation: 0.04, gdp_growth: -0.005 }) },
+      { regime: 'Recession', ...computeRegimeImpact({ gdp_growth: -0.03, unemployment: 0.02 }) },
+      { regime: 'Bull Market', ...computeRegimeImpact({ gdp_growth: 0.04, vix: -0.25 }) },
     ];
 
     return regimes.map(r => ({
@@ -172,7 +200,7 @@ const PortfolioBuilder = () => {
       improvement: +(r.causal - r.traditional).toFixed(1),
       isCurrentRegime: r.regime.toLowerCase().includes(String(currentRegime).toLowerCase()),
     }));
-  }, [regimeData]);
+  }, [regimeData, sensitivityData]);
 
   const handleOptimize = async () => {
     try {
@@ -253,7 +281,7 @@ const PortfolioBuilder = () => {
         end_date: new Date().toISOString().split('T')[0],
       });
       
-      setBacktestResults(result);
+      setBacktestResults({ backtest: result });
       toast({
         title: "Backtest Complete",
         description: `Historical return: ${((result?.backtest?.total_return || 0) * 100).toFixed(1)}%`,
@@ -585,7 +613,7 @@ const PortfolioBuilder = () => {
                     </div>
                   </div>
                 ))}
-                <div className="text-sm font-medium text-success">Total: 100%</div>
+                <div className="text-sm font-medium text-success">Total: {sectors.reduce((sum, s) => sum + s.causal, 0)}%</div>
               </div>
 
               {/* Metrics with improvements */}

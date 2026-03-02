@@ -553,7 +553,7 @@ def _get_simulated_backtest(
         'total_return': round(float(cumulative[-1] - 1) * 100, 2),
         'annualized_return': round(float((cumulative[-1] ** (252 / days) - 1) * 100), 2),
         'volatility': round(float(np.std(returns) * np.sqrt(252) * 100), 2),
-        'sharpe_ratio': 0.65,
+        'sharpe_ratio': round(float((cumulative[-1] ** (252 / days) - 1)) / float(np.std(returns) * np.sqrt(252)) if np.std(returns) > 0 else 0, 2),
         'max_drawdown': round(float(np.min(cumulative / np.maximum.accumulate(cumulative) - 1) * 100), 2),
         'time_series': [],
         'note': 'Simulated backtest - real market data unavailable'
