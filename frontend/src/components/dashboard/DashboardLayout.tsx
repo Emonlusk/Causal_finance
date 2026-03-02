@@ -225,13 +225,13 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem asChild>
-                  <Link to="/settings" className="cursor-pointer">
+                  <Link to="/dashboard" className="cursor-pointer">
                     <User className="w-4 h-4 mr-2" />
                     Profile Settings
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
-                  <Link to="/settings" className="cursor-pointer">
+                  <Link to="/dashboard" className="cursor-pointer">
                     <Settings className="w-4 h-4 mr-2" />
                     Preferences
                   </Link>

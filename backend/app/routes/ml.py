@@ -289,13 +289,18 @@ def predict_sector():
                 'Materials': 0.0007,
             }
             base = base_returns.get(sector, 0.0008)
-            predictions = [base + random.uniform(-0.015, 0.02) for _ in range(horizon)]
+            mean_preds = [base + random.uniform(-0.015, 0.02) for _ in range(horizon)]
+            std_preds = [abs(p) * 0.5 for p in mean_preds]
             
             return jsonify({
                 'success': True,
                 'sector': sector,
                 'horizon': horizon,
-                'predictions': predictions,
+                'predictions': {
+                    'mean': mean_preds,
+                    'std': std_preds,
+                    'models': {}
+                },
                 'demo_mode': True,
                 'message': 'Using demo predictions. Train ML models for real forecasts.'
             })
@@ -405,14 +410,18 @@ def predict_volatility():
         garch.fit(recent_returns)
         predictions = garch.predict(steps=horizon)
         
+        vol_list = predictions['volatility'].tolist() if hasattr(predictions['volatility'], 'tolist') else list(predictions['volatility'])
+        var_list = predictions['variance'].tolist() if hasattr(predictions['variance'], 'tolist') else list(predictions['variance'])
+        
         return jsonify({
             'success': True,
             'sector': sector,
             'horizon': horizon,
             'predictions': {
-                'volatility': predictions['volatility'].tolist(),
-                'variance': predictions['variance'].tolist()
-            }
+                'volatility': vol_list,
+                'variance': var_list
+            },
+            'volatility': vol_list  # Top-level for frontend compatibility
         })
         
     except Exception as e:

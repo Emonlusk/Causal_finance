@@ -316,6 +316,24 @@ class GARCHForecaster:
         if self.model is None:
             return {'error': 'Model not fitted'}
         
+        # Handle EWMA fallback model (when arch library is not available)
+        if isinstance(self.model, dict) and self.model.get('type') == 'ewma':
+            last_vol = self.model['last_vol']
+            vol_forecast = []
+            current_vol = last_vol
+            for i in range(steps):
+                current_vol = 0.97 * current_vol + 0.03 * last_vol
+                vol_forecast.append(current_vol)
+            volatility = np.array(vol_forecast)
+            variance = volatility ** 2
+            return {
+                'volatility': volatility,
+                'variance': variance,
+                'volatility_forecast': volatility.tolist(),
+                'steps': steps,
+                'method': 'ewma_fallback',
+            }
+        
         try:
             # Get forecast
             forecast = self.model.forecast(horizon=steps, method=method)
@@ -347,6 +365,8 @@ class GARCHForecaster:
                 ci_upper = annualized_vol * 1.2
             
             return {
+                'volatility': annualized_vol,
+                'variance': variance,
                 'volatility_forecast': annualized_vol.tolist(),
                 'ci_lower': ci_lower.tolist() if hasattr(ci_lower, 'tolist') else [ci_lower],
                 'ci_upper': ci_upper.tolist() if hasattr(ci_upper, 'tolist') else [ci_upper],

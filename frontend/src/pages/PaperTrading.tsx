@@ -1088,7 +1088,10 @@ const PaperTrading = () => {
                 </div>
                 {sectorPrediction.data?.predictions ? (
                   <div className="space-y-2">
-                    {sectorPrediction.data.predictions.slice(0, 5).map((pred: number, idx: number) => {
+                    {(Array.isArray(sectorPrediction.data.predictions)
+                      ? sectorPrediction.data.predictions
+                      : sectorPrediction.data.predictions.mean || []
+                    ).slice(0, 5).map((pred: number, idx: number) => {
                       const isPositive = pred >= 0;
                       return (
                         <div key={idx} className="flex items-center gap-2">
@@ -1125,9 +1128,9 @@ const PaperTrading = () => {
                   </div>
                   {volatilityPrediction.isPending && <Loader2 className="w-4 h-4 animate-spin" />}
                 </div>
-                {volatilityPrediction.data?.volatility ? (
+                {(volatilityPrediction.data?.volatility || volatilityPrediction.data?.predictions?.volatility) ? (
                   <div className="space-y-2">
-                    {volatilityPrediction.data.volatility.slice(0, 5).map((vol: number, idx: number) => {
+                    {(volatilityPrediction.data.volatility || volatilityPrediction.data.predictions?.volatility || []).slice(0, 5).map((vol: number, idx: number) => {
                       const riskLevel = vol > 0.03 ? 'High' : vol > 0.015 ? 'Medium' : 'Low';
                       const riskColor = vol > 0.03 ? 'text-red-500' : vol > 0.015 ? 'text-amber-500' : 'text-green-500';
                       return (

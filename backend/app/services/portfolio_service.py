@@ -516,10 +516,10 @@ def _get_simulated_backtest(
         'start_date': start_date,
         'end_date': end_date,
         'total_return': round(float(cumulative[-1] - 1) * 100, 2),
-        'annualized_return': round(float((cumulative[-1] - 1) * 100), 2),
+        'annualized_return': round(float((cumulative[-1] ** (252 / days) - 1) * 100), 2),
         'volatility': round(float(np.std(returns) * np.sqrt(252) * 100), 2),
         'sharpe_ratio': 0.65,
-        'max_drawdown': -8.5,
+        'max_drawdown': round(float(np.min(cumulative / np.maximum.accumulate(cumulative) - 1) * 100), 2),
         'time_series': [],
         'note': 'Simulated backtest - real market data unavailable'
     }
