@@ -406,8 +406,29 @@ def predict_volatility():
         
         recent_returns = features[sector_col].dropna().tail(500)
         
+        # Try loading pre-trained GARCH model from registry first
         garch = GARCHForecaster()
-        garch.fit(recent_returns)
+        pretrained_loaded = False
+        
+        try:
+            import glob
+            model_dir = os.path.join(DATA_DIR, 'models')
+            # Model files follow pattern: garch_{SectorName}_{version}.pkl
+            sector_name = sector.replace(' ', '_')
+            pattern = os.path.join(model_dir, f'garch_{sector_name}_*.pkl')
+            model_files = sorted(glob.glob(pattern), reverse=True)  # Latest first
+            
+            if model_files:
+                garch.load(model_files[0])
+                pretrained_loaded = True
+                logger.info(f"Loaded pre-trained GARCH for {sector}: {os.path.basename(model_files[0])}")
+        except Exception as e:
+            logger.warning(f"Failed to load pre-trained GARCH for {sector}: {e}")
+        
+        if not pretrained_loaded:
+            garch.fit(recent_returns)
+            logger.info(f"Fitted fresh GARCH model for {sector}")
+        
         predictions = garch.predict(steps=horizon)
         
         vol_list = predictions['volatility'].tolist() if hasattr(predictions['volatility'], 'tolist') else list(predictions['volatility'])

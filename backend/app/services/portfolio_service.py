@@ -308,16 +308,39 @@ def _optimize_with_causal(
     Uses ML-trained sensitivity matrix when available.
     """
     from app.services.causal_service import get_active_sensitivity_matrix
+    from app.services.market_service import get_current_indicators
     
     active_matrix = get_active_sensitivity_matrix()
     
-    # Get current economic conditions for causal adjustment
-    # In production, this would fetch real economic data and forecasts
-    economic_forecast = {
-        'interest_rates': 0.005,  # Expected 0.5% increase
-        'inflation': -0.002,  # Expected slight decrease
-        'gdp_growth': 0.003  # Expected modest growth
-    }
+    # Fetch live market indicators for causal adjustment
+    try:
+        indicators = get_current_indicators()
+        # Derive directional economic forecasts from current levels
+        # Fed rate direction: above 4% → tightening (+), below → easing (-)
+        fed_rate = indicators.get('treasury_10y', {}).get('value', 4.5)
+        rate_forecast = (fed_rate - 4.0) / 100  # Normalize to impact scale
+        
+        # VIX direction: above 20 → risk-off, below → risk-on
+        vix = indicators.get('vix', {}).get('value', 18.0)
+        inflation_proxy = (vix - 18.0) / 1000  # Higher VIX correlates with inflation fears
+        
+        # S&P 500 trend as GDP growth proxy
+        sp500_change = indicators.get('sp500', {}).get('change', 0)
+        gdp_proxy = sp500_change / 100  # Market momentum as growth indicator
+        
+        economic_forecast = {
+            'interest_rates': round(rate_forecast, 4),
+            'inflation': round(inflation_proxy, 4),
+            'gdp_growth': round(gdp_proxy, 4)
+        }
+        logger.info(f"Causal optimizer using live indicators: {economic_forecast}")
+    except Exception as e:
+        logger.warning(f"Failed to fetch live indicators, using defaults: {e}")
+        economic_forecast = {
+            'interest_rates': 0.005,
+            'inflation': -0.002,
+            'gdp_growth': 0.003
+        }
     
     # Adjust expected returns based on causal relationships
     adjusted_returns = mean_returns.copy()
@@ -360,16 +383,28 @@ def _calculate_metrics(
     cov_matrix: np.ndarray,
     risk_free_rate: float = 0.04
 ) -> Dict[str, float]:
-    """Calculate portfolio metrics"""
+    """Calculate portfolio metrics with parametric max drawdown estimate."""
     portfolio_return = float(np.dot(weights, mean_returns))
     portfolio_vol = float(np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights))))
     sharpe = (portfolio_return - risk_free_rate) / portfolio_vol if portfolio_vol > 0 else 0
+    
+    # Parametric expected max drawdown (Magdon-Ismail et al., 2004)
+    # E[MDD] ≈ σ × √(π/2) for a driftless random walk over 1 year
+    # Adjusted downward for positive excess return (drift reduces drawdowns)
+    if portfolio_vol > 0:
+        base_mdd = portfolio_vol * np.sqrt(np.pi / 2)  # ≈ 1.253 × σ
+        excess_return = max(0, portfolio_return - risk_free_rate)
+        drift_reduction = excess_return * 0.5  # Positive drift cushions drawdowns
+        expected_mdd = max(base_mdd - drift_reduction, portfolio_vol * 0.5)  # Floor at 0.5σ
+        max_drawdown = round(-expected_mdd * 100, 2)
+    else:
+        max_drawdown = 0.0
     
     return {
         'expected_return': round(portfolio_return * 100, 2),
         'volatility': round(portfolio_vol * 100, 2),
         'sharpe_ratio': round(sharpe, 2),
-        'max_drawdown': round(-portfolio_vol * 2 * 100, 2)  # Approximate
+        'max_drawdown': max_drawdown
     }
 
 
