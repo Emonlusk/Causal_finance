@@ -14,11 +14,17 @@ services:
     region: oregon
     plan: free
     rootDir: backend
-    buildCommand: pip install -r requirements-render.txt && python -c "from app import create_app, db; app = create_app('production'); app.app_context().push(); db.create_all()"
-    startCommand: gunicorn wsgi:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+    buildCommand: >-
+      pip install --upgrade pip &&
+      pip install -r requirements-render.txt &&
+      mkdir -p data/raw data/processed data/models &&
+      python -c "from app import create_app, db; app = create_app('production'); ctx = app.app_context(); ctx.push(); db.create_all(); print('DB tables created')"
+    startCommand: gunicorn wsgi:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120 --preload
     envVars:
       - key: FLASK_ENV
         value: production
+      - key: PYTHON_VERSION
+        value: 3.11.0
       - key: SECRET_KEY
         generateValue: true
       - key: JWT_SECRET_KEY
