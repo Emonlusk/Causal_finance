@@ -12,10 +12,12 @@ SQLAlchemy==2.0.30
 # Data processing (use versions with pre-built wheels)
 pandas==2.2.2
 numpy==1.26.4
+pyarrow>=15.0
 
 # Financial data APIs
-yfinance==0.2.40
+yfinance>=1.5.1
 fredapi==0.5.2
+APScheduler>=3.10
 
 # ============================================
 # MACHINE LEARNING & CAUSAL INFERENCE
@@ -30,7 +32,9 @@ arch==7.1.0
 
 # Causal Inference
 dowhy==0.11.1
-econml==0.15.1
+econml>=0.15.1
+networkx==3.2.1   # dowhy 0.11 needs pre-3.3 d_separated API
+pydot==2.0.0      # dowhy graph parsing breaks with pydot 3.x
 
 # Bayesian Networks & Causal Discovery
 pgmpy==0.1.26
@@ -50,6 +54,7 @@ scipy==1.13.1
 
 # Utilities
 python-dotenv==1.0.1
+python-dateutil>=2.8.2
 marshmallow==3.21.3
 werkzeug==3.0.3
 gunicorn==22.0.0

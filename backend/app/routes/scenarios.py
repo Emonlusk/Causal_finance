@@ -139,7 +139,7 @@ def run_scenario():
         description=f'Impact: {results.get("portfolio_impact", 0):.1%}',
         entity_type='scenario' if scenario else None,
         entity_id=scenario.id if scenario else None,
-        metadata={'parameters': parameters}
+        activity_metadata={'parameters': parameters}
     )
     
     response = {
@@ -183,7 +183,7 @@ def run_preset_scenario(preset_id):
         activity_type='scenario_run',
         title=f'Ran preset: {preset["name"]}',
         description=preset['description'],
-        metadata={'preset_id': preset_id, 'parameters': preset['parameters']}
+        activity_metadata={'preset_id': preset_id, 'parameters': preset['parameters']}
     )
     
     return jsonify({

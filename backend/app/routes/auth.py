@@ -138,8 +138,11 @@ def get_current_user():
 @auth_bp.route('/logout', methods=['POST'])
 @jwt_required()
 def logout():
-    """Logout user (client should discard tokens)"""
-    # In a more robust implementation, you'd add the token to a blocklist
+    """Logout user — revokes token by adding JTI to blocklist"""
+    from app import _jwt_blocklist
+    jti = get_jwt().get('jti')
+    if jti:
+        _jwt_blocklist.add(jti)
     return jsonify({
         'message': 'Logout successful'
     }), 200

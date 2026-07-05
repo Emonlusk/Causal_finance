@@ -17,15 +17,18 @@ if __name__ == '__main__':
     debug = config_name == 'development'
     port = int(os.getenv('PORT', 5000))
     
-    print(f"""
-    ╔══════════════════════════════════════════════════════════════╗
-    ║           🚀 Causal Finance API Server                       ║
-    ╠══════════════════════════════════════════════════════════════╣
-    ║  Environment: {config_name:<44} ║
-    ║  Debug Mode:  {str(debug):<44} ║
-    ║  URL:         http://localhost:{port}/api{' ' * (38 - len(str(port)))}║
-    ║  Health:      http://localhost:{port}/api/health{' ' * (31 - len(str(port)))}║
-    ╚══════════════════════════════════════════════════════════════╝
-    """)
-    
+    banner = f"""
+    Causal Finance API Server
+    -------------------------
+    Environment: {config_name}
+    Debug Mode:  {debug}
+    URL:         http://localhost:{port}/api
+    Health:      http://localhost:{port}/api/health
+    """
+    # Windows consoles may use cp1252; never let the banner kill the server
+    try:
+        print(banner)
+    except UnicodeEncodeError:
+        print(banner.encode('ascii', 'ignore').decode())
+
     app.run(host='0.0.0.0', port=port, debug=debug)

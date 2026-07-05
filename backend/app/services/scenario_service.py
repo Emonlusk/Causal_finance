@@ -119,16 +119,38 @@ def _calculate_sector_impacts(parameters: Dict[str, Dict]) -> Dict[str, float]:
     """
     sector_impacts = {}
     
+    # Normalize parameters: accept both {'factor': value} and {'factor': {'change': value}}
+    # Also handle common shorthand names
+    PARAM_ALIASES = {
+        'rate_change': 'interest_rates',
+        'fed_rate': 'interest_rates',
+        'interest_rate': 'interest_rates',
+        'inflation_change': 'inflation',
+        'gdp_change': 'gdp_growth',
+        'unemployment_change': 'unemployment',
+        'volatility': 'vix',
+        'oil_change': 'oil_prices',
+        'severity': 'equity_shock',
+    }
+    
+    normalized: dict = {}
+    for key, val in parameters.items():
+        canonical = PARAM_ALIASES.get(key, key)
+        if isinstance(val, (int, float)):
+            normalized[canonical] = val
+        elif isinstance(val, dict):
+            normalized[canonical] = val.get('change', val.get('value', 0))
+        else:
+            normalized[canonical] = 0
+    
     # Use trained ML matrix when available, fall back to hardcoded defaults
     active_matrix = get_active_sensitivity_matrix()
     
     for sector, sensitivities in active_matrix.items():
         total_impact = 0
         
-        for factor, params in parameters.items():
-            change = params.get('change', 0)
+        for factor, change in normalized.items():
             sensitivity = sensitivities.get(factor, 0)
-            
             # Impact = sensitivity * change magnitude
             impact = sensitivity * change
             total_impact += impact

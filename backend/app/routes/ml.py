@@ -253,91 +253,81 @@ def get_data_status():
 @ml_bp.route('/predict/sector', methods=['POST'])
 def predict_sector():
     """
-    Predict sector returns.
-    
-    Request body:
-    {
-        "sector": "Technology",
-        "horizon": 21
-    }
+    Predict sector returns with the walk-forward validated ensemble
+    (GBM + ARIMA + EGARCH + LSTM). Returns expected return, 90% CI,
+    direction probability, and honest validation metrics per horizon.
+
+    Request body: { "sector": "Technology" }
     """
     try:
         data = request.get_json() or {}
-        
         sector = data.get('sector', 'Technology')
-        horizon = min(data.get('horizon', 21), 30)  # Cap at 30 days
-        
-        # Load recent data
-        feature_path = os.path.join(DATA_DIR, 'processed', 'feature_matrix.parquet')
-        
-        if not os.path.exists(feature_path):
-            # Return demo predictions when no data available
-            import random
-            random.seed(hash(sector))  # Consistent by sector
-            
-            # Generate realistic-looking predictions based on sector characteristics
-            base_returns = {
-                'Technology': 0.0012,
-                'Financials': 0.0008,
-                'Healthcare': 0.0007,
-                'Energy': 0.0010,
-                'Consumer Staples': 0.0005,
-                'Consumer Discretionary': 0.0009,
-                'Industrials': 0.0008,
-                'Utilities': 0.0004,
-                'Real Estate': 0.0006,
-                'Materials': 0.0007,
+
+        from ..services.prediction_engine import get_prediction_engine
+        result = get_prediction_engine().predict_sector(sector)
+
+        if 'error' in result:
+            return jsonify({'success': False, **result}), 404
+
+        # Back-compat fields for older frontend components:
+        # a 'mean'/'std' daily path derived from the 21d forecast
+        h21 = result['horizons'].get('21') or next(iter(result['horizons'].values()), None)
+        if h21:
+            daily_mean = h21['expected_return'] / 21
+            daily_std = (h21['volatility_pct'] / 100) / (21 ** 0.5)
+            result['predictions'] = {
+                'mean': [daily_mean] * 21,
+                'std': [daily_std] * 21,
+                'models': result['horizons'],
             }
-            base = base_returns.get(sector, 0.0008)
-            mean_preds = [base + random.uniform(-0.015, 0.02) for _ in range(horizon)]
-            std_preds = [abs(p) * 0.5 for p in mean_preds]
-            
-            return jsonify({
-                'success': True,
-                'sector': sector,
-                'horizon': horizon,
-                'predictions': {
-                    'mean': mean_preds,
-                    'std': std_preds,
-                    'models': {}
-                },
-                'demo_mode': True,
-                'message': 'Using demo predictions. Train ML models for real forecasts.'
-            })
-        
-        features = pd.read_parquet(feature_path)
-        
-        # Find sector column
-        sector_col = f"{sector}_Return_1d"
-        if sector_col not in features.columns:
-            # Try to find similar
-            similar = [c for c in features.columns if sector.lower() in c.lower()]
-            if similar:
-                sector_col = similar[0]
-            else:
-                return jsonify({
-                    'success': False,
-                    'error': f'Sector {sector} not found'
-                }), 404
-        
-        recent_data = features[sector_col].tail(252)  # Last year
-        
-        service = get_prediction_service()
-        predictions = service.predict_sector_returns(sector, recent_data, horizon)
-        
-        return jsonify({
-            'success': True,
-            'sector': sector,
-            'horizon': horizon,
-            'predictions': predictions
-        })
-        
+
+        return jsonify({'success': True, **result})
+
     except Exception as e:
         logger.error(f"Sector prediction failed: {e}")
         return jsonify({
             'success': False,
             'error': str(e)
         }), 500
+
+
+@ml_bp.route('/predict/symbol/<symbol>', methods=['GET'])
+def predict_symbol(symbol):
+    """
+    Per-stock forecast: sector ensemble forecast propagated through the
+    stock's beta to its sector ETF plus idiosyncratic volatility.
+    """
+    try:
+        from ..services.prediction_engine import get_prediction_engine
+        result = get_prediction_engine().predict_symbol(symbol)
+        if 'error' in result:
+            return jsonify({'success': False, **result}), 404
+        return jsonify({'success': True, **result})
+    except Exception as e:
+        logger.error(f"Symbol prediction failed for {symbol}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@ml_bp.route('/forecast/all', methods=['GET'])
+def forecast_all():
+    """All-sector forecast summary (used by dashboard/predictions page)."""
+    try:
+        from ..services.prediction_engine import get_prediction_engine
+        engine = get_prediction_engine()
+        out = {}
+        for sector in engine.available_sectors():
+            f = engine.predict_sector(sector)
+            if 'error' not in f:
+                out[sector] = {
+                    'etf': f['etf'],
+                    'as_of': f['as_of'],
+                    'horizons': f['horizons'],
+                    'model_version': f['model_version'],
+                }
+        return jsonify({'success': True, 'forecasts': out})
+    except Exception as e:
+        logger.error(f"Forecast summary failed: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @ml_bp.route('/predict/volatility', methods=['POST'])
@@ -356,80 +346,34 @@ def predict_volatility():
         
         sector = data.get('sector', 'Technology')
         horizon = min(data.get('horizon', 21), 30)  # Cap at 30 days
-        
-        # Load recent data
-        feature_path = os.path.join(DATA_DIR, 'processed', 'feature_matrix.parquet')
-        
-        if not os.path.exists(feature_path):
-            # Return demo volatility predictions when no data available
-            import random
-            random.seed(hash(sector) + 42)  # Consistent by sector
-            
-            # Generate realistic volatility forecasts based on sector
-            base_vol = {
-                'Technology': 0.022,
-                'Financials': 0.020,
-                'Healthcare': 0.018,
-                'Energy': 0.028,
-                'Consumer Staples': 0.012,
-                'Consumer Discretionary': 0.024,
-                'Industrials': 0.019,
-                'Utilities': 0.014,
-                'Real Estate': 0.020,
-                'Materials': 0.021,
-            }
-            base = base_vol.get(sector, 0.020)
-            volatility = [base * (1 + random.uniform(-0.2, 0.3)) for _ in range(horizon)]
-            variance = [v ** 2 for v in volatility]
-            
-            return jsonify({
-                'success': True,
-                'sector': sector,
-                'horizon': horizon,
-                'predictions': {
-                    'volatility': volatility,
-                    'variance': variance
-                },
-                'volatility': volatility,  # Also at top level for frontend compatibility
-                'demo_mode': True,
-                'message': 'Using demo predictions. Train ML models for GARCH forecasts.'
-            })
-        
-        features = pd.read_parquet(feature_path)
-        
-        # Get return column
-        sector_col = f"{sector}_Return_1d"
-        if sector_col not in features.columns:
-            sector_col = [c for c in features.columns if sector.lower() in c.lower() and 'Return' in c][0]
-        
+
+        # Live returns from the price store (not a stale research parquet)
+        from ..services.prediction_engine import SECTOR_TO_ETF, SectorModelBundle
+        from ..services.price_store import get_price_store
         from ..services.forecasting_service import GARCHForecaster
-        
-        recent_returns = features[sector_col].dropna().tail(500)
-        
-        # Try loading pre-trained GARCH model from registry first
-        garch = GARCHForecaster()
-        pretrained_loaded = False
-        
-        try:
-            import glob
-            model_dir = os.path.join(DATA_DIR, 'models')
-            # Model files follow pattern: garch_{SectorName}_{version}.pkl
-            sector_name = sector.replace(' ', '_')
-            pattern = os.path.join(model_dir, f'garch_{sector_name}_*.pkl')
-            model_files = sorted(glob.glob(pattern), reverse=True)  # Latest first
-            
-            if model_files:
-                garch.load(model_files[0])
-                pretrained_loaded = True
-                logger.info(f"Loaded pre-trained GARCH for {sector}: {os.path.basename(model_files[0])}")
-        except Exception as e:
-            logger.warning(f"Failed to load pre-trained GARCH for {sector}: {e}")
-        
-        if not pretrained_loaded:
-            garch.fit(recent_returns)
-            logger.info(f"Fitted fresh GARCH model for {sector}")
-        
-        predictions = garch.predict(steps=horizon)
+        import numpy as np
+
+        sector_key = sector.replace(' ', '_')
+        etf = SECTOR_TO_ETF.get(sector_key)
+        if not etf:
+            return jsonify({'success': False, 'error': f'Unknown sector: {sector}'}), 404
+
+        prices = get_price_store().get_history([etf], start='2018-01-01')
+        if prices.empty or etf not in prices.columns:
+            return jsonify({'success': False, 'error': 'Price data unavailable'}), 503
+        recent_returns = np.log(prices[etf] / prices[etf].shift(1)).dropna()
+
+        # Prefer the trained bundle's EGARCH; refit fresh if missing
+        garch = None
+        bundle = SectorModelBundle.load(sector_key)
+        if bundle is not None and bundle.garch is not None:
+            garch = bundle.garch
+        if garch is None:
+            garch = GARCHForecaster(model_type='EGARCH')
+            garch.fit(recent_returns.tail(1000))
+            logger.info(f"Fitted fresh EGARCH model for {sector}")
+
+        predictions = garch.predict(steps=horizon, method='simulation', n_simulations=500)
         
         vol_list = predictions['volatility'].tolist() if hasattr(predictions['volatility'], 'tolist') else list(predictions['volatility'])
         var_list = predictions['variance'].tolist() if hasattr(predictions['variance'], 'tolist') else list(predictions['variance'])
@@ -457,46 +401,41 @@ def predict_volatility():
 # REGIME ENDPOINTS
 # ============================================
 
+def _live_regime_features():
+    """Build the regime-detection input frame from live price store data."""
+    try:
+        import numpy as np
+        from ..services.price_store import get_price_store
+        prices = get_price_store().get_history(['SPY'], start='2015-01-01')
+        if prices.empty or 'SPY' not in prices.columns:
+            return None
+        frame = pd.DataFrame(index=prices.index)
+        frame['SP500_Return'] = prices['SPY'].pct_change()
+        frame['SP500_Volatility_21d'] = frame['SP500_Return'].rolling(21).std() * np.sqrt(252)
+        return frame.dropna()
+    except Exception as e:
+        logger.error(f"Live regime features failed: {e}")
+        return None
+
+
 @ml_bp.route('/regime/current', methods=['GET'])
 def get_current_regime():
     """
     Get current market regime detection.
     """
     try:
-        feature_path = os.path.join(DATA_DIR, 'processed', 'feature_matrix.parquet')
-        
-        if not os.path.exists(feature_path):
-            # Return demo regime with realistic market data
-            import random
-            regimes = ['bull_market', 'sideways', 'high_volatility', 'recovery']
-            weights = [0.35, 0.40, 0.15, 0.10]  # Realistic distribution
-            selected_regime = random.choices(regimes, weights=weights)[0]
-            
-            regime_descriptions = {
-                'bull_market': 'Markets showing positive momentum with healthy economic indicators.',
-                'sideways': 'Markets in consolidation phase with mixed signals.',
-                'high_volatility': 'Elevated market uncertainty with larger price swings.',
-                'recovery': 'Markets rebounding from recent weakness.',
-            }
-            
-            return jsonify({
-                'success': True,
-                'regime': {
-                    'current_regime': selected_regime,
-                    'message': regime_descriptions.get(selected_regime, 'Market conditions evolving.'),
-                    'confidence': round(random.uniform(0.65, 0.85), 2)
-                },
-                'demo_mode': True
-            })
-        
-        features = pd.read_parquet(feature_path)
+        features = _live_regime_features()
+        if features is None:
+            return jsonify({'success': False,
+                            'error': 'Live market data unavailable for regime detection'}), 503
+
         regime = detect_current_regime(features)
-        
+
         return jsonify({
             'success': True,
             'regime': regime
         })
-        
+
     except Exception as e:
         logger.error(f"Regime detection failed: {e}")
         return jsonify({
@@ -511,53 +450,17 @@ def get_regime_recommendations():
     Get portfolio recommendations for current regime.
     """
     try:
-        feature_path = os.path.join(DATA_DIR, 'processed', 'feature_matrix.parquet')
-        
-        current_regime = 'sideways'  # default
-        
-        if os.path.exists(feature_path):
-            features = pd.read_parquet(feature_path)
-            regime = detect_current_regime(features)
-            current_regime = regime.get('current_regime', 'sideways')
-            
-            detector = MarketRegimeDetector()
-            recommendations = detector.get_regime_recommendations(current_regime)
-        else:
-            # Return demo recommendations based on typical market conditions
-            demo_recommendations = {
-                'bull_market': [
-                    {'sector': 'Technology', 'action': 'buy', 'reason': 'High growth potential in expansionary markets'},
-                    {'sector': 'Consumer Discretionary', 'action': 'buy', 'reason': 'Consumer spending rises in bull markets'},
-                    {'sector': 'Financials', 'action': 'buy', 'reason': 'Banks benefit from economic growth'},
-                    {'sector': 'Utilities', 'action': 'reduce', 'reason': 'Defensive sectors underperform in bull markets'},
-                ],
-                'bear_market': [
-                    {'sector': 'Consumer Staples', 'action': 'buy', 'reason': 'Defensive positioning for market downturn'},
-                    {'sector': 'Healthcare', 'action': 'buy', 'reason': 'Recession-resistant sector'},
-                    {'sector': 'Utilities', 'action': 'buy', 'reason': 'Stable dividends in volatile markets'},
-                    {'sector': 'Technology', 'action': 'reduce', 'reason': 'High-growth stocks vulnerable to selloff'},
-                ],
-                'high_volatility': [
-                    {'sector': 'Consumer Staples', 'action': 'buy', 'reason': 'Low beta stocks reduce portfolio risk'},
-                    {'sector': 'Utilities', 'action': 'buy', 'reason': 'Stability during market turbulence'},
-                    {'sector': 'Healthcare', 'action': 'hold', 'reason': 'Defensive with growth potential'},
-                    {'sector': 'Energy', 'action': 'reduce', 'reason': 'High volatility amplifies sector swings'},
-                ],
-                'sideways': [
-                    {'sector': 'Financials', 'action': 'buy', 'reason': 'Value opportunities in consolidation'},
-                    {'sector': 'Healthcare', 'action': 'buy', 'reason': 'Defensive growth mix'},
-                    {'sector': 'Technology', 'action': 'hold', 'reason': 'Wait for directional clarity'},
-                    {'sector': 'Industrials', 'action': 'hold', 'reason': 'Cyclical sector needs momentum'},
-                ],
-                'recovery': [
-                    {'sector': 'Industrials', 'action': 'buy', 'reason': 'Early cycle recovery play'},
-                    {'sector': 'Materials', 'action': 'buy', 'reason': 'Benefits from economic rebound'},
-                    {'sector': 'Financials', 'action': 'buy', 'reason': 'Credit conditions improving'},
-                    {'sector': 'Consumer Discretionary', 'action': 'buy', 'reason': 'Consumer confidence recovering'},
-                ],
-            }
-            recommendations = demo_recommendations.get(current_regime, demo_recommendations['sideways'])
-        
+        features = _live_regime_features()
+        if features is None:
+            return jsonify({'success': False,
+                            'error': 'Live market data unavailable for regime detection'}), 503
+
+        regime = detect_current_regime(features)
+        current_regime = regime.get('current_regime', 'sideways')
+
+        detector = MarketRegimeDetector()
+        recommendations = detector.get_regime_recommendations(current_regime)
+
         return jsonify({
             'success': True,
             'current_regime': current_regime,
@@ -657,7 +560,12 @@ def get_causal_dag():
         sector_returns = features[sector_cols].dropna()
         
         engine = CausalDiscoveryEngine()
-        dag = engine.build_causal_dag(sector_returns)
+        # Discover relationships first, then build consensus DAG
+        relationships = engine.discover_all_relationships(
+            sector_returns,
+            methods=['granger', 'pc', 'correlation']
+        )
+        dag = engine.build_causal_dag(relationships)
         
         return jsonify({
             'success': True,
@@ -759,13 +667,20 @@ def get_sensitivity_matrix():
         sector_cols = [c for c in features.columns if c.endswith('_Return_1d')]
         
         available_macro = [c for c in macro_cols if c in features.columns]
+        sector_names = [c.replace('_Return_1d', '') for c in sector_cols]
         
         estimator = TreatmentEffectEstimator()
-        matrix = estimator.build_sensitivity_matrix(features, available_macro, sector_cols)
+        # First compute effects, then build sensitivity matrix from them
+        macro_treatments = [f'{m}_Change' if not m.endswith('_Change') else m for m in available_macro]
+        effects = estimator.estimate_macro_sector_effects(
+            features, sectors=sector_names, macro_treatments=macro_treatments
+        )
+        matrix = estimator.build_sensitivity_matrix(effects)
         
         return jsonify({
             'success': True,
-            'sensitivity_matrix': matrix
+            'sensitivity_matrix': matrix,
+            'matrix': matrix  # Also at 'matrix' for frontend compatibility
         })
         
     except Exception as e:

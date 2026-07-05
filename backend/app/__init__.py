@@ -13,6 +13,9 @@ migrate = Migrate()
 jwt = JWTManager()
 cache = Cache()
 
+# In-memory JWT blocklist (stores revoked token JTIs)
+_jwt_blocklist: set = set()
+
 
 def create_app(config_name='default'):
     """Application factory pattern"""
@@ -46,6 +49,18 @@ def create_app(config_name='default'):
             'error': 'Authorization required',
             'message': error_string
         }), 401
+
+    @jwt.token_in_blocklist_loader
+    def check_if_token_revoked(jwt_header, jwt_payload):
+        """Check whether a token has been revoked (e.g., after logout)"""
+        return jwt_payload.get('jti') in _jwt_blocklist
+    
+    @jwt.revoked_token_loader
+    def revoked_token_callback(jwt_header, jwt_payload):
+        return jsonify({
+            'error': 'Token revoked',
+            'message': 'Please login again'
+        }), 401
     
     # Configure CORS
     CORS(app, origins=app.config['CORS_ORIGINS'], supports_credentials=True)
@@ -75,5 +90,9 @@ def create_app(config_name='default'):
     # Create database tables
     with app.app_context():
         db.create_all()
-    
+
+    # Background data refresh (quote prewarm, price store updates)
+    from app.services.scheduler import start_scheduler
+    start_scheduler(app)
+
     return app

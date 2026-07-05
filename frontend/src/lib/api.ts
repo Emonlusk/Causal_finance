@@ -177,7 +177,36 @@ export const marketApi = {
 
   getTrending: () =>
     fetchWithAuth<{ trending: TrendingStock[] }>('/market/trending'),
+
+  getBatchQuotes: (symbols: string[]) =>
+    fetchWithAuth<{ quotes: Record<string, BatchQuote> }>(
+      `/market/quotes?symbols=${symbols.map(encodeURIComponent).join(',')}`
+    ),
+
+  getMarketStatus: () =>
+    fetchWithAuth<{ status: MarketStatus }>('/market/status'),
 };
+
+export interface BatchQuote {
+  symbol: string;
+  price: number;
+  previous_close: number;
+  change: number;
+  change_percent: number;
+  day_high: number | null;
+  day_low: number | null;
+  volume: number;
+  bar_date: string;
+  as_of: string;
+  source: 'live' | 'cached';
+}
+
+export interface MarketStatus {
+  state: 'open' | 'pre' | 'post' | 'closed';
+  is_open: boolean;
+  local_time_et: string;
+  note?: string;
+}
 
 // ============================================
 // Portfolio API
@@ -247,14 +276,21 @@ export const portfolioApi = {
         shares: number;
         avg_cost: number;
         current_price: number;
+        previous_close: number;
+        day_change: number;
+        day_change_pct: number;
         market_value: number;
         cost_basis: number;
         gain_loss: number;
         gain_loss_pct: number;
+        price_source: string;
       }>;
       total_value: number;
       cash_balance: number;
       total_equity: number;
+      total_cost_basis: number;
+      total_gain_loss: number;
+      total_day_change: number;
     }>(`/portfolios/${portfolioId}/holdings`),
 
   allocateCash: (portfolioId: number, amount: number) =>
@@ -266,7 +302,43 @@ export const portfolioApi = {
       method: 'POST',
       body: JSON.stringify({ amount }),
     }),
+
+  getTrades: (portfolioId: number, limit: number = 100) =>
+    fetchWithAuth<{
+      portfolio_id: number;
+      trades: TradeRecord[];
+      realized_pnl_total: number;
+      count: number;
+    }>(`/portfolios/${portfolioId}/trades?limit=${limit}`),
+
+  getEquityCurve: (portfolioId: number, days: number = 365) =>
+    fetchWithAuth<{
+      portfolio_id: number;
+      equity_curve: EquityPoint[];
+    }>(`/portfolios/${portfolioId}/equity-curve?days=${days}`),
 };
+
+export interface TradeRecord {
+  id: number;
+  portfolio_id: number;
+  symbol: string;
+  side: 'buy' | 'sell';
+  shares: number;
+  price: number;
+  total: number;
+  price_source: string;
+  realized_pnl: number | null;
+  avg_cost_at_trade: number | null;
+  created_at: string;
+}
+
+export interface EquityPoint {
+  portfolio_id: number;
+  equity: number;
+  cash_balance: number;
+  market_value: number;
+  date: string;
+}
 
 // ============================================
 // Causal Analysis API
@@ -859,6 +931,14 @@ export const mlApi = {
       body: JSON.stringify({ sector, horizon }),
     }),
 
+  predictSymbol: (symbol: string) =>
+    fetchWithAuth<SymbolForecast>(`/ml/predict/symbol/${encodeURIComponent(symbol)}`),
+
+  forecastAll: () =>
+    fetchWithAuth<{ success: boolean; forecasts: Record<string, SectorForecastSummary> }>(
+      '/ml/forecast/all'
+    ),
+
   // Regime Detection
   getCurrentRegime: () =>
     fetchWithAuth<MLRegimeResponse>('/ml/regime/current'),
@@ -907,6 +987,40 @@ export const activityApi = {
 // ============================================
 // ML Type Definitions
 // ============================================
+export interface HorizonForecast {
+  expected_return_pct: number;
+  ci_lower_pct: number;
+  ci_upper_pct: number;
+  volatility_pct: number;
+  prob_up: number | null;
+  model_predictions_pct?: Record<string, number>;
+  ensemble_weights?: Record<string, number>;
+  validation?: Record<string, number>;
+  sector_forecast_pct?: number;
+}
+
+export interface SymbolForecast {
+  success: boolean;
+  symbol?: string;
+  sector: string;
+  sector_etf?: string;
+  etf?: string;
+  beta_to_sector?: number;
+  idiosyncratic_vol_pct?: number;
+  as_of: string;
+  horizons: Record<string, HorizonForecast>;
+  model_version: string;
+  method: string;
+  error?: string;
+}
+
+export interface SectorForecastSummary {
+  etf: string;
+  as_of: string;
+  horizons: Record<string, HorizonForecast>;
+  model_version: string;
+}
+
 export interface MLTrainingResponse {
   success: boolean;
   pipeline_id?: string;

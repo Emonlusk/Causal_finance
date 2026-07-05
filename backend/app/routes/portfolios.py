@@ -130,7 +130,7 @@ def update_portfolio(portfolio_id):
             description='Portfolio weights updated',
             entity_type='portfolio',
             entity_id=portfolio.id,
-            metadata={'old_weights': old_weights, 'new_weights': portfolio.weights}
+            activity_metadata={'old_weights': old_weights, 'new_weights': portfolio.weights}
         )
     
     return jsonify({
@@ -197,6 +197,16 @@ def optimize_portfolio():
     assets = data.get('assets', list(SECTOR_ETFS.keys()))
     use_causal = data.get('use_causal', True)
     causal_model_id = data.get('causal_model_id')
+    risk_tolerance = data.get('risk_tolerance')  # 0.0 (conservative) to 1.0 (aggressive)
+    
+    # Map risk_tolerance to objective if provided and no explicit objective given
+    if risk_tolerance is not None and 'objective' not in data:
+        if risk_tolerance <= 0.3:
+            objective = 'min_volatility'
+        elif risk_tolerance >= 0.7:
+            objective = 'max_return'
+        else:
+            objective = 'max_sharpe'
     
     # Run optimization
     from app.services.portfolio_service import optimize_portfolio_weights
@@ -263,138 +273,86 @@ def execute_paper_trade(portfolio_id):
     if not data:
         return jsonify({'error': 'No data provided'}), 400
     
-    symbol = data.get('symbol', '').upper()
-    action = data.get('action', '').lower()  # 'buy' or 'sell'
-    shares = data.get('shares', 0)
-    
-    if not symbol:
-        return jsonify({'error': 'Symbol is required'}), 400
-    if action not in ['buy', 'sell']:
-        return jsonify({'error': 'Action must be "buy" or "sell"'}), 400
-    if not shares or shares <= 0:
-        return jsonify({'error': 'Shares must be a positive number'}), 400
-    
-    # Get current price using the market service (has fallback support)
-    current_price = None
-    price_source = 'unknown'
-    
+    from app.services.trading_service import execute_trade, snapshot_portfolio, TradeError
+
     try:
-        from app.services.market_service import get_real_time_quote, get_fallback_quote
-        
-        # Try to get quote from market service (handles caching and fallbacks)
-        quote = get_real_time_quote(symbol)
-        if quote and quote.get('price'):
-            current_price = quote['price']
-            price_source = quote.get('source', 'live')
-        
-        # If market service failed, try direct fallback
-        if not current_price:
-            fallback = get_fallback_quote(symbol)
-            if fallback:
-                current_price = fallback['price']
-                price_source = 'fallback'
-        
-        if not current_price:
-            return jsonify({
-                'error': f'Could not get price for {symbol}. The symbol may be invalid or the market data service is temporarily unavailable.'
-            }), 400
-            
+        fill = execute_trade(
+            portfolio,
+            user_id=current_user_id,
+            symbol=data.get('symbol', ''),
+            side=data.get('action', ''),
+            shares=data.get('shares', 0),
+        )
+        snapshot_portfolio(portfolio)
+        db.session.commit()
+    except TradeError as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 400
     except Exception as e:
-        # Try direct fallback as last resort
-        try:
-            from app.services.market_service import get_fallback_quote
-            fallback = get_fallback_quote(symbol)
-            if fallback:
-                current_price = fallback['price']
-                price_source = 'fallback'
-            else:
-                return jsonify({'error': f'Failed to fetch price for {symbol}: {str(e)}'}), 400
-        except:
-            return jsonify({'error': f'Failed to fetch price for {symbol}: {str(e)}'}), 400
-    
-    total_cost = current_price * shares
-    holdings = portfolio.holdings or {}
-    portfolio_cash = portfolio.cash_balance or 0
-    
-    if action == 'buy':
-        # Check if PORTFOLIO has enough cash
-        if portfolio_cash < total_cost:
-            return jsonify({
-                'error': f'Insufficient portfolio funds. Need ${total_cost:,.2f}, portfolio has ${portfolio_cash:,.2f}. Allocate more cash first.'
-            }), 400
-        
-        # Deduct from PORTFOLIO balance
-        portfolio.cash_balance = portfolio_cash - total_cost
-        
-        # Add to portfolio holdings
-        if symbol in holdings:
-            # Calculate new average cost
-            existing_shares = holdings[symbol].get('shares', 0)
-            existing_cost = holdings[symbol].get('avg_cost', 0)
-            total_shares = existing_shares + shares
-            new_avg_cost = ((existing_shares * existing_cost) + (shares * current_price)) / total_shares
-            holdings[symbol] = {'shares': total_shares, 'avg_cost': round(new_avg_cost, 2)}
-        else:
-            holdings[symbol] = {'shares': shares, 'avg_cost': round(current_price, 2)}
-        
-        activity_title = f'Bought {shares} shares of {symbol}'
-        activity_desc = f'Purchased {shares} shares of {symbol} at ${current_price:,.2f}'
-        
-    else:  # sell
-        # Check if portfolio has enough shares
-        if symbol not in holdings or holdings[symbol].get('shares', 0) < shares:
-            available = holdings.get(symbol, {}).get('shares', 0)
-            return jsonify({
-                'error': f'Insufficient shares. Have {available}, trying to sell {shares}'
-            }), 400
-        
-        # Add proceeds to PORTFOLIO balance
-        portfolio.cash_balance = (portfolio.cash_balance or 0) + total_cost
-        
-        # Remove from portfolio holdings
-        holdings[symbol]['shares'] -= shares
-        if holdings[symbol]['shares'] <= 0:
-            del holdings[symbol]
-        
-        activity_title = f'Sold {shares} shares of {symbol}'
-        activity_desc = f'Sold {shares} shares of {symbol} at ${current_price:,.2f}'
-    
-    portfolio.holdings = holdings
-    # Mark JSON column as modified (SQLAlchemy doesn't detect in-place changes)
-    from sqlalchemy.orm.attributes import flag_modified
-    flag_modified(portfolio, 'holdings')
-    db.session.commit()
-    
-    # Log activity
+        db.session.rollback()
+        return jsonify({'error': f'Trade failed: {e}'}), 500
+
+    verb = 'Bought' if fill['action'] == 'buy' else 'Sold'
+    pnl_note = ''
+    if fill.get('realized_pnl') is not None:
+        pnl_note = f" (realized P&L ${fill['realized_pnl']:,.2f})"
     Activity.log_activity(
         user_id=current_user_id,
         activity_type='paper_trade',
-        title=activity_title,
-        description=activity_desc,
+        title=f"{verb} {fill['shares']:g} shares of {fill['symbol']}",
+        description=f"{verb} {fill['shares']:g} shares of {fill['symbol']} "
+                    f"at ${fill['price']:,.2f}{pnl_note}",
         entity_type='portfolio',
         entity_id=portfolio_id,
-        activity_metadata={
-            'action': action,
-            'symbol': symbol,
-            'shares': shares,
-            'price': current_price,
-            'total': total_cost
-        }
+        activity_metadata=fill
     )
-    
+
     return jsonify({
-        'message': f'Successfully {action} {shares} shares of {symbol}',
-        'trade': {
-            'action': action,
-            'symbol': symbol,
-            'shares': shares,
-            'price': current_price,
-            'total': total_cost
-        },
+        'message': f"Successfully {'bought' if fill['action'] == 'buy' else 'sold'} "
+                   f"{fill['shares']:g} shares of {fill['symbol']}",
+        'trade': fill,
         'portfolio': portfolio.to_dict(),
         'portfolio_cash': portfolio.cash_balance,
         'user_balance': user.cash_balance
     }), 200
+
+
+@portfolios_bp.route('/<int:portfolio_id>/trades', methods=['GET'])
+@jwt_required()
+def get_trade_history(portfolio_id):
+    """Order history for a portfolio (most recent first)."""
+    current_user_id = get_jwt_identity()
+    portfolio = Portfolio.query.filter_by(id=portfolio_id, user_id=current_user_id).first()
+    if not portfolio:
+        return jsonify({'error': 'Portfolio not found'}), 404
+
+    from app.models.trade import Trade
+    limit = min(int(request.args.get('limit', 100)), 500)
+    trades = (Trade.query.filter_by(portfolio_id=portfolio_id)
+              .order_by(Trade.created_at.desc()).limit(limit).all())
+
+    realized_total = sum(t.realized_pnl for t in trades if t.realized_pnl is not None)
+    return jsonify({
+        'portfolio_id': portfolio_id,
+        'trades': [t.to_dict() for t in trades],
+        'realized_pnl_total': round(realized_total, 2),
+        'count': len(trades),
+    }), 200
+
+
+@portfolios_bp.route('/<int:portfolio_id>/equity-curve', methods=['GET'])
+@jwt_required()
+def get_portfolio_equity_curve(portfolio_id):
+    """Equity curve (daily snapshots + live point) for a portfolio."""
+    current_user_id = get_jwt_identity()
+    portfolio = Portfolio.query.filter_by(id=portfolio_id, user_id=current_user_id).first()
+    if not portfolio:
+        return jsonify({'error': 'Portfolio not found'}), 404
+
+    from app.services.trading_service import get_equity_curve
+    days = min(int(request.args.get('days', 365)), 1825)
+    curve = get_equity_curve(portfolio, days=days)
+    return jsonify({'portfolio_id': portfolio_id, 'equity_curve': curve}), 200
 
 
 @portfolios_bp.route('/<int:portfolio_id>/holdings', methods=['GET'])
@@ -407,113 +365,21 @@ def get_portfolio_holdings(portfolio_id):
     if not portfolio:
         return jsonify({'error': 'Portfolio not found'}), 404
     
-    holdings = portfolio.holdings or {}
-    
-    if not holdings:
-        return jsonify({
-            'portfolio_id': portfolio_id,
-            'holdings': [],
-            'total_value': 0,
-            'cash_balance': portfolio.cash_balance or 0
-        }), 200
-    
-    # Get live prices
-    enriched_holdings = []
-    total_value = 0
-    
+    from app.services.trading_service import value_portfolio, snapshot_portfolio
+
+    valuation = value_portfolio(portfolio)
+
+    # Opportunistically keep today's equity snapshot fresh
     try:
-        import yfinance as yf
-        import random
-        for symbol, data in holdings.items():
-            try:
-                ticker = yf.Ticker(symbol)
-                info = ticker.info
-                current_price = info.get('regularMarketPrice', 0) or info.get('currentPrice', 0)
-                previous_close = info.get('previousClose', 0) or info.get('regularMarketPreviousClose', 0)
-                
-                if not current_price:
-                    current_price = data.get('avg_cost', 0)
-                
-                shares = data.get('shares', 0)
-                avg_cost = data.get('avg_cost', 0)
-                market_value = current_price * shares
-                cost_basis = avg_cost * shares
-                gain_loss = market_value - cost_basis
-                gain_loss_pct = ((current_price - avg_cost) / avg_cost * 100) if avg_cost > 0 else 0
-                
-                # Calculate day change
-                day_change = current_price - previous_close if previous_close else 0
-                day_change_pct = (day_change / previous_close * 100) if previous_close else 0
-                
-                enriched_holdings.append({
-                    'symbol': symbol,
-                    'shares': shares,
-                    'avg_cost': avg_cost,
-                    'current_price': round(current_price, 2),
-                    'previous_close': round(previous_close, 2) if previous_close else None,
-                    'day_change': round(day_change, 2),
-                    'day_change_pct': round(day_change_pct, 2),
-                    'market_value': round(market_value, 2),
-                    'cost_basis': round(cost_basis, 2),
-                    'gain_loss': round(gain_loss, 2),
-                    'gain_loss_pct': round(gain_loss_pct, 2)
-                })
-                total_value += market_value
-            except Exception as e:
-                # Use avg_cost if live price fails with small random variation
-                import random
-                shares = data.get('shares', 0)
-                avg_cost = data.get('avg_cost', 0)
-                variation = random.uniform(-0.005, 0.005)  # ±0.5% random variation
-                current_price = avg_cost * (1 + variation)
-                market_value = current_price * shares
-                gain_loss = market_value - (avg_cost * shares)
-                gain_loss_pct = (variation * 100)
-                enriched_holdings.append({
-                    'symbol': symbol,
-                    'shares': shares,
-                    'avg_cost': avg_cost,
-                    'current_price': round(current_price, 2),
-                    'previous_close': avg_cost,
-                    'day_change': round(current_price - avg_cost, 2),
-                    'day_change_pct': round(variation * 100, 2),
-                    'market_value': round(market_value, 2),
-                    'cost_basis': round(avg_cost * shares, 2),
-                    'gain_loss': round(gain_loss, 2),
-                    'gain_loss_pct': round(gain_loss_pct, 2),
-                })
-                total_value += market_value
-    except ImportError:
-        # yfinance not available - add random variation
-        import random
-        for symbol, data in holdings.items():
-            shares = data.get('shares', 0)
-            avg_cost = data.get('avg_cost', 0)
-            variation = random.uniform(-0.005, 0.005)
-            current_price = avg_cost * (1 + variation)
-            market_value = current_price * shares
-            enriched_holdings.append({
-                'symbol': symbol,
-                'shares': shares,
-                'avg_cost': avg_cost,
-                'current_price': round(current_price, 2),
-                'previous_close': avg_cost,
-                'day_change': round(current_price - avg_cost, 2),
-                'day_change_pct': round(variation * 100, 2),
-                'market_value': round(market_value, 2),
-                'cost_basis': round(avg_cost * shares, 2),
-                'gain_loss': round((current_price - avg_cost) * shares, 2),
-                'gain_loss_pct': round(variation * 100, 2)
-            })
-            total_value += market_value
-    
+        snapshot_portfolio(portfolio, valuation)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
     return jsonify({
         'portfolio_id': portfolio_id,
         'portfolio_name': portfolio.name,
-        'holdings': enriched_holdings,
-        'total_value': round(total_value, 2),
-        'cash_balance': portfolio.cash_balance or 0,
-        'total_equity': round(total_value + (portfolio.cash_balance or 0), 2)
+        **valuation,
     }), 200
 
 

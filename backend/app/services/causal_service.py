@@ -151,8 +151,8 @@ def get_active_sensitivity_matrix() -> Dict[str, Dict[str, float]]:
     Uses trained ML model if available, otherwise falls back to defaults.
     """
     trained_matrix = _get_trained_sensitivity_matrix()
-    
-    if trained_matrix:
+
+    if isinstance(trained_matrix, dict) and trained_matrix:
         logger.info("Using trained ML sensitivity matrix")
         return trained_matrix
     
@@ -373,14 +373,7 @@ def _estimate_effect_analytical(treatment: str, outcome: str) -> Dict[str, Any]:
     Provide analytical estimate when DoWhy is not available
     Uses predefined sector sensitivity coefficients
     """
-    base_effect = _get_base_effect(treatment, outcome)
-    
-    # Add small deterministic perturbation for realism
-    import hashlib
-    seed = int(hashlib.md5(f"{treatment}_{outcome}".encode()).hexdigest(), 16) % 2**32
-    np.random.seed(seed)
-    noise = np.random.normal(0, 0.02)  # Small noise relative to coefficients
-    effect = base_effect + noise
+    effect = _get_base_effect(treatment, outcome)
     
     # Standard error and CI based on effect magnitude
     se = 0.15 * abs(effect) + 0.03  # SE scales with effect size

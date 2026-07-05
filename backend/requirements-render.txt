@@ -19,16 +19,33 @@ psycopg2-binary==2.9.9
 # Data processing
 pandas==2.2.2
 numpy==1.26.4
+pyarrow>=15.0
 
 # Financial data APIs
-yfinance==0.2.40
+yfinance>=1.5.1
 fredapi==0.5.2
+APScheduler>=3.10
 
 # Core ML (lightweight)
 scikit-learn==1.5.2
 
 # Time Series Analysis
 statsmodels==0.14.4
+
+# Causal Inference (required for core functionality)
+dowhy==0.11.1
+econml>=0.15.1
+networkx==3.2.1   # dowhy 0.11 needs pre-3.3 d_separated API
+pydot==2.0.0      # dowhy graph parsing breaks with pydot 3.x
+
+# Causal Discovery
+pgmpy==0.1.26
+
+# Regime Detection
+hmmlearn==0.3.3
+
+# Volatility Modeling
+arch==7.1.0
 
 # Model Serialization
 joblib==1.4.2

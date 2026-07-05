@@ -13,6 +13,7 @@ import ScenarioSimulator from "./pages/ScenarioSimulator";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import PaperTrading from "./pages/PaperTrading";
+import Predictions from "./pages/Predictions";
 import NotFound from "./pages/NotFound";
 import { Loader2 } from "lucide-react";
 
@@ -81,7 +82,8 @@ const AppRoutes = () => (
     <Route path="/analysis" element={<ProtectedRoute><CausalAnalysis /></ProtectedRoute>} />
     <Route path="/simulator" element={<ProtectedRoute><ScenarioSimulator /></ProtectedRoute>} />
     <Route path="/paper-trading" element={<ProtectedRoute><PaperTrading /></ProtectedRoute>} />
-    
+    <Route path="/predictions" element={<ProtectedRoute><Predictions /></ProtectedRoute>} />
+
     {/* 404 */}
     <Route path="*" element={<NotFound />} />
   </Routes>

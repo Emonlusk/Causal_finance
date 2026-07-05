@@ -12,7 +12,7 @@ Data Sources:
 import os
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 import numpy as np
 import yfinance as yf
@@ -133,8 +133,9 @@ class DataPipeline:
         tickers = list(SECTOR_ETFS.keys())
         
         try:
-            # Batch download for efficiency
-            data = yf.download(tickers, start=start_date, end=end_date, group_by='ticker', progress=False)
+            # Batch download for efficiency (auto_adjust=False keeps Adj Close column)
+            data = yf.download(tickers, start=start_date, end=end_date, group_by='ticker',
+                               auto_adjust=False, progress=False)
             
             for ticker, sector in SECTOR_ETFS.items():
                 try:
@@ -177,9 +178,14 @@ class DataPipeline:
         
         for ticker, name in MARKET_INDICES.items():
             try:
-                data = yf.download(ticker, start=start_date, end=end_date, progress=False)
+                data = yf.download(ticker, start=start_date, end=end_date,
+                                   auto_adjust=False, progress=False)
                 if not data.empty:
-                    result_df[name] = data['Close']
+                    close = data['Close']
+                    # Newer yfinance returns MultiIndex columns even for one ticker
+                    if isinstance(close, pd.DataFrame):
+                        close = close.iloc[:, 0]
+                    result_df[name] = close
             except Exception as e:
                 logger.warning(f"Error fetching {ticker}: {e}")
         
@@ -522,18 +528,24 @@ class DataPipeline:
         self,
         target_sector: str = 'Technology',
         lookback_days: int = 252 * 5,  # 5 years
-        target_horizon: int = 21  # 21-day forward return
+        target_horizon: int = 21,  # 21-day forward return
+        train_end_date: str = '2021-04-30',
+        test_start_date: str = '2021-05-01'
     ) -> Tuple[pd.DataFrame, pd.Series]:
         """
-        Prepare data for ML model training.
+        Prepare data for ML model training with STRICT temporal train/test split.
+        
+        CRITICAL: No future data leaks into training set.
         
         Args:
             target_sector: Sector to predict returns for
             lookback_days: How many days of history to use
             target_horizon: Forward return horizon in days
+            train_end_date: Last date for training data (inclusive)
+            test_start_date: First date for test data (inclusive)
             
         Returns:
-            Tuple of (X features, y target)
+            Tuple of (X features, y target) — training set only
         """
         feature_matrix = self.load_data('feature_matrix')
         
@@ -563,7 +575,229 @@ class DataPipeline:
         X = X[valid_idx]
         y = y[valid_idx]
         
+        # STRICT TEMPORAL SPLIT — only return training data
+        X = X[X.index <= train_end_date]
+        y = y[y.index <= train_end_date]
+        
+        logger.info(f"Training data: {X.shape[0]} samples, ends at {train_end_date}")
+        
         return X, y
+    
+    def get_train_test_split(
+        self,
+        target_sector: str = 'Technology',
+        target_horizon: int = 21,
+        train_end_date: str = '2021-04-30',
+        test_start_date: str = '2021-05-01'
+    ) -> Tuple[pd.DataFrame, pd.Series, pd.DataFrame, pd.Series]:
+        """
+        Get strict temporal train/test split for model evaluation.
+        
+        CRITICAL: Prevents all forms of data leakage:
+        - Training data ends BEFORE test_start_date
+        - Forward-looking target is computed BEFORE splitting
+        - No overlap between train and test periods
+        
+        Args:
+            target_sector: Sector to predict returns for
+            target_horizon: Forward return horizon in days
+            train_end_date: Last date for training data
+            test_start_date: First date for test data
+            
+        Returns:
+            Tuple of (X_train, y_train, X_test, y_test)
+        """
+        feature_matrix = self.load_data('feature_matrix')
+        
+        if feature_matrix is None:
+            result = self.run_full_pipeline()
+            feature_matrix = result.get('feature_matrix')
+        
+        if feature_matrix is None or feature_matrix.empty:
+            raise ValueError("Could not load or create feature matrix")
+        
+        # Create target: forward return
+        target_col = f'{target_sector}_Return_1d'
+        if target_col not in feature_matrix.columns:
+            raise ValueError(f"Target column {target_col} not found")
+        
+        y_all = feature_matrix[target_col].shift(-target_horizon)
+        X_all = feature_matrix.drop(
+            columns=[c for c in feature_matrix.columns if target_sector in c and 'Return' in c]
+        )
+        
+        # Drop NaN targets
+        valid_idx = ~y_all.isna()
+        X_all = X_all[valid_idx]
+        y_all = y_all[valid_idx]
+        
+        # STRICT TEMPORAL SPLIT
+        train_mask = X_all.index <= train_end_date
+        test_mask = X_all.index >= test_start_date
+        
+        X_train, y_train = X_all[train_mask], y_all[train_mask]
+        X_test, y_test = X_all[test_mask], y_all[test_mask]
+        
+        # Verify no overlap
+        if len(X_train) > 0 and len(X_test) > 0:
+            assert X_train.index.max() < X_test.index.min(), \
+                "DATA LEAKAGE: Train and test sets overlap!"
+        
+        logger.info(f"Train: {len(X_train)} samples ({X_train.index.min()} to {X_train.index.max()})")
+        logger.info(f"Test:  {len(X_test)} samples ({X_test.index.min()} to {X_test.index.max()})")
+        
+        return X_train, y_train, X_test, y_test
+    
+    def run_adf_stationarity_tests(
+        self,
+        data: Optional[pd.DataFrame] = None,
+        columns: Optional[List[str]] = None,
+        significance: float = 0.05
+    ) -> pd.DataFrame:
+        """
+        Run Augmented Dickey-Fuller stationarity test on all specified columns.
+        
+        Non-stationary treatment variables violate causal inference assumptions.
+        
+        Args:
+            data: DataFrame to test (if None, loads feature_matrix from disk)
+            columns: Columns to test (if None, tests all numeric columns)
+            significance: Significance level for stationarity determination
+            
+        Returns:
+            DataFrame with ADF test results for each column
+        """
+        from statsmodels.tsa.stattools import adfuller
+        
+        if data is not None:
+            feature_matrix = data
+        else:
+            feature_matrix = self.load_data('feature_matrix')
+            if feature_matrix is None:
+                raise ValueError("No feature matrix available. Run pipeline first.")
+        
+        if columns is None:
+            columns = feature_matrix.select_dtypes(include=[np.number]).columns.tolist()
+        
+        results = []
+        for col in columns:
+            series = feature_matrix[col].dropna()
+            if len(series) < 30:
+                results.append({
+                    'variable': col,
+                    'adf_statistic': None,
+                    'p_value': None,
+                    'stationary': None,
+                    'note': 'Insufficient data'
+                })
+                continue
+            
+            try:
+                adf_result = adfuller(series, maxlag=10, autolag='AIC')
+                is_stationary = adf_result[1] < significance
+                results.append({
+                    'variable': col,
+                    'adf_statistic': round(adf_result[0], 4),
+                    'p_value': round(adf_result[1], 6),
+                    'n_lags': adf_result[2],
+                    'n_obs': adf_result[3],
+                    'critical_1pct': round(adf_result[4]['1%'], 4),
+                    'critical_5pct': round(adf_result[4]['5%'], 4),
+                    'critical_10pct': round(adf_result[4]['10%'], 4),
+                    'stationary': is_stationary,
+                })
+            except Exception as e:
+                results.append({
+                    'variable': col,
+                    'adf_statistic': None,
+                    'p_value': None,
+                    'stationary': None,
+                    'note': str(e)
+                })
+        
+        df = pd.DataFrame(results)
+        non_stationary = df[df['stationary'] == False]
+        if len(non_stationary) > 0:
+            logger.warning(f"NON-STATIONARY variables detected: {non_stationary['variable'].tolist()}")
+        
+        return df
+    
+    def validate_data(self, data: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
+        """
+        Run comprehensive data validation checks for Phase 1 of the paper protocol.
+        
+        Checks:
+        1. Shape, date range, null counts
+        2. Feature correlations (flag > 0.85)
+        3. Distribution statistics (mean, std, skew, kurtosis)
+        4. ADF stationarity tests
+        
+        Args:
+            data: DataFrame to validate (if None, loads feature_matrix from disk)
+        
+        Returns:
+            Dictionary with all validation results
+        """
+        if data is not None:
+            feature_matrix = data
+        else:
+            feature_matrix = self.load_data('feature_matrix')
+            if feature_matrix is None:
+                return {'error': 'No feature matrix available'}
+        
+        results = {}
+        
+        # 1. Basic info
+        results['shape'] = {'rows': feature_matrix.shape[0], 'columns': feature_matrix.shape[1]}
+        results['date_range'] = {
+            'start': str(feature_matrix.index.min()),
+            'end': str(feature_matrix.index.max())
+        }
+        results['null_counts'] = feature_matrix.isnull().sum().to_dict()
+        results['total_nulls'] = int(feature_matrix.isnull().sum().sum())
+        
+        # 2. Correlation check
+        numeric_cols = feature_matrix.select_dtypes(include=[np.number]).columns
+        corr_matrix = feature_matrix[numeric_cols].corr()
+        high_corr_pairs = []
+        for i in range(len(numeric_cols)):
+            for j in range(i + 1, len(numeric_cols)):
+                corr_val = abs(corr_matrix.iloc[i, j])
+                if corr_val > 0.85:
+                    high_corr_pairs.append({
+                        'var1': numeric_cols[i],
+                        'var2': numeric_cols[j],
+                        'correlation': round(corr_val, 4)
+                    })
+        results['high_correlations'] = high_corr_pairs
+        results['n_high_correlations'] = len(high_corr_pairs)
+        
+        # 3. Distribution statistics
+        dist_stats = {}
+        for col in numeric_cols:
+            series = feature_matrix[col].dropna()
+            if len(series) > 0:
+                from scipy import stats as scipy_stats
+                dist_stats[col] = {
+                    'mean': round(float(series.mean()), 6),
+                    'std': round(float(series.std()), 6),
+                    'skew': round(float(scipy_stats.skew(series)), 4),
+                    'kurtosis': round(float(scipy_stats.kurtosis(series)), 4),
+                    'min': round(float(series.min()), 6),
+                    'max': round(float(series.max()), 6),
+                }
+        results['distribution_stats'] = dist_stats
+        
+        # 4. ADF stationarity tests (on treatment-like variables)
+        treatment_cols = [c for c in numeric_cols if 'Change' in c or 'Return' in c or 'Rate' in c]
+        if treatment_cols:
+            try:
+                adf_results = self.run_adf_stationarity_tests(data=feature_matrix, columns=treatment_cols)
+                results['adf_tests'] = adf_results.to_dict('records')
+            except Exception as e:
+                results['adf_tests'] = {'error': str(e)}
+        
+        return results
 
 
 # Singleton instance

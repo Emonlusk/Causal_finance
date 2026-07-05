@@ -356,8 +356,12 @@ class MLTrainingPipeline:
         pc_result = causal_engine.pc_algorithm(sector_returns.dropna())
         results['pc_algorithm'] = pc_result
         
-        # Build DAG
-        dag = causal_engine.build_causal_dag(sector_returns)
+        # Discover relationships then build DAG
+        relationships = causal_engine.discover_all_relationships(
+            sector_returns.dropna(),
+            methods=['granger', 'pc', 'correlation']
+        )
+        dag = causal_engine.build_causal_dag(relationships)
         results['causal_dag'] = dag
         
         # Save results
@@ -399,21 +403,28 @@ class MLTrainingPipeline:
         results = {}
         
         estimator = TreatmentEffectEstimator()
-        
-        # Macro to sector effects
-        macro_cols = ['Fed_Funds_Rate', 'CPI_Change', 'GDP_Change']
+
+        # Full 7-treatment set from the research protocol
+        macro_treatments = [
+            'Fed_Funds_Rate_Change', 'CPI_Change', 'GDP_Change',
+            'Oil_WTI_Change', 'Treasury_10Y_Yield_Change',
+            'Unemployment_Rate_Change', 'VIX_Change',
+        ]
         sector_cols = [c for c in train_data.columns if c.endswith('_Return_1d')]
-        
-        available_macro = [c for c in macro_cols if c in train_data.columns]
-        
+
+        available_macro = [c for c in macro_treatments if c in train_data.columns]
+
         if available_macro and sector_cols:
             # Extract sector names from column names (e.g. 'Technology_Return_1d' -> 'Technology')
             sector_names = [c.replace('_Return_1d', '') for c in sector_cols]
 
+            # DML: causal ML rigor at production speed. Full DoWhy with
+            # refutation tests runs in the research scripts (phase2).
             effects_matrix = estimator.estimate_macro_sector_effects(
                 train_data,
                 sectors=sector_names,
-                macro_treatments=[f'{m}_Change' if not m.endswith('_Change') else m for m in available_macro]
+                macro_treatments=available_macro,
+                method='dml'
             )
             results['macro_sector_effects'] = effects_matrix
             
@@ -453,83 +464,16 @@ class MLTrainingPipeline:
         version: str,
         data_hash: str
     ) -> Dict[str, Any]:
-        """Train forecasting models for each sector."""
-        results = {'models': {}, 'evaluations': {}}
-        
-        sector_cols = [c for c in train_data.columns if c.endswith('_Return_1d')]
-        
-        for sector_col in sector_cols[:5]:  # Limit to 5 sectors for speed
-            sector_name = sector_col.replace('_Return_1d', '')
-            results['models'][sector_name] = {}
-            results['evaluations'][sector_name] = {}
-            
-            train_series = train_data[sector_col].dropna()
-            test_series = test_data[sector_col].dropna()
-            
-            if len(train_series) < 252:
-                continue
-            
-            # ARIMA
-            try:
-                arima = ARIMAForecaster()
-                arima.fit(train_series)
-                arima_preds = arima.predict(steps=len(test_series))
-                
-                arima_rmse = np.sqrt(np.mean((test_series.values - arima_preds['mean'][:len(test_series)])**2))
-                results['evaluations'][sector_name]['arima'] = {'rmse': float(arima_rmse)}
-                
-                arima_path = os.path.join(MODELS_DIR, f'arima_{sector_name}_{version}.pkl')
-                arima.save(arima_path)
-                results['models'][sector_name]['arima'] = arima_path
-            except Exception as e:
-                logger.warning(f"ARIMA failed for {sector_name}: {e}")
-            
-            # GARCH
-            try:
-                garch = GARCHForecaster()
-                garch.fit(train_series)
-                garch_preds = garch.predict(steps=len(test_series))
-                
-                results['evaluations'][sector_name]['garch'] = {
-                    'mean_volatility': float(np.mean(garch_preds['volatility']))
-                }
-                
-                garch_path = os.path.join(MODELS_DIR, f'garch_{sector_name}_{version}.pkl')
-                garch.save(garch_path)
-                results['models'][sector_name]['garch'] = garch_path
-            except Exception as e:
-                logger.warning(f"GARCH failed for {sector_name}: {e}")
-            
-            # LSTM (if enough data)
-            if len(train_series) >= 500:
-                try:
-                    lstm = LSTMForecaster(sequence_length=60, hidden_size=64)
-                    lstm.fit(train_series, epochs=50, verbose=False)
-                    lstm_preds = lstm.predict(train_series.values[-60:], steps=len(test_series))
-                    
-                    lstm_rmse = np.sqrt(np.mean((test_series.values - lstm_preds['mean'][:len(test_series)])**2))
-                    results['evaluations'][sector_name]['lstm'] = {'rmse': float(lstm_rmse)}
-                    
-                    lstm_path = os.path.join(MODELS_DIR, f'lstm_{sector_name}_{version}.pkl')
-                    lstm.save(lstm_path)
-                    results['models'][sector_name]['lstm'] = lstm_path
-                except Exception as e:
-                    logger.warning(f"LSTM failed for {sector_name}: {e}")
-        
-        # Register ensemble
-        self.registry.register_model(
-            model_type='forecast',
-            model_name='ensemble',
-            version=version,
-            metrics=results['evaluations'],
-            hyperparameters={'models': ['arima', 'garch', 'lstm']},
-            filepath=MODELS_DIR,
-            training_data_hash=data_hash
-        )
-        
-        model_id = f"forecast_ensemble_{version}"
-        self.registry.set_active_model('forecast', model_id)
-        
+        """
+        Train forecasting models for every sector via the v2 prediction
+        engine (GBM + ARIMA + EGARCH + LSTM, walk-forward validated).
+        The engine trains from PriceStore data, registers itself with the
+        registry, and invalidates the serving cache.
+        """
+        from app.services.prediction_engine import train_all_sectors, get_prediction_engine
+
+        results = train_all_sectors(version=version, train_lstm=True)
+        get_prediction_engine().invalidate()
         return results
     
     def _train_regime_model(
@@ -783,6 +727,18 @@ class PredictionService:
         detector = MarketRegimeDetector()
         return detector._fallback_predict(recent_returns, recent_volatility)
     
+    # Maps feature-matrix treatment columns to the factor keys the app uses
+    TREATMENT_TO_FACTOR = {
+        'Fed_Funds_Rate_Change': 'interest_rates',
+        'CPI_Change': 'inflation',
+        'GDP_Change': 'gdp_growth',
+        'Unemployment_Rate_Change': 'unemployment',
+        'VIX_Change': 'vix',
+        'Oil_WTI_Change': 'oil_price',
+        'Treasury_10Y_Yield_Change': 'treasury_10y',
+    }
+    FACTOR_TO_TREATMENT = {v: k for k, v in TREATMENT_TO_FACTOR.items()}
+
     def get_causal_effects(
         self,
         treatment: str,
@@ -790,23 +746,69 @@ class PredictionService:
     ) -> Optional[Dict[str, Any]]:
         """Get estimated causal effect between two variables."""
         model = self._load_model('treatment')
-        
-        if model and 'effects_matrix' in model:
-            effects = model['effects_matrix']
+        if not model or 'effects_matrix' not in model:
+            return None
+
+        effects = model['effects_matrix']
+        treatment_col = self.FACTOR_TO_TREATMENT.get(treatment, treatment)
+
+        # Current format: nested {sector: {treatment_col: effect_dict}}
+        if isinstance(effects, dict):
+            for sector, tmap in effects.items():
+                if not isinstance(tmap, dict):
+                    continue
+                sector_key = str(sector).lower()
+                out_norm = outcome.lower().replace(' ', '_').replace('-', '_')
+                if out_norm in (sector_key, f'{sector_key}_return_1d'):
+                    effect = tmap.get(treatment_col) or tmap.get(treatment)
+                    if isinstance(effect, dict) and 'ate' in effect:
+                        return effect
+            return None
+
+        # Legacy format: flat list of effect dicts
+        try:
             for effect in effects:
                 if effect.get('treatment') == treatment and effect.get('outcome') == outcome:
                     return effect
-        
+        except Exception:
+            pass
         return None
-    
+
     def get_sensitivity_matrix(self) -> Optional[Dict[str, Dict[str, float]]]:
-        """Get the trained sensitivity matrix."""
+        """
+        Trained sensitivity matrix in consumer format:
+        {sector_key: {factor: sensitivity}} with each factor's column scaled
+        so its largest |effect| is 0.8 (matching the analytical matrix's
+        units, so downstream causal tilts stay comparably sized).
+        """
         model = self._load_model('treatment')
-        
-        if model and 'sensitivity_matrix' in model:
-            return model['sensitivity_matrix']
-        
-        return None
+        if not model or 'sensitivity_matrix' not in model:
+            return None
+
+        sm = model['sensitivity_matrix']
+
+        if isinstance(sm, dict):
+            return sm or None
+
+        try:
+            import pandas as pd
+            if not isinstance(sm, pd.DataFrame) or sm.empty:
+                return None
+            out: Dict[str, Dict[str, float]] = {}
+            for col in sm.columns:
+                factor = self.TREATMENT_TO_FACTOR.get(str(col))
+                if not factor:
+                    continue
+                col_vals = sm[col].astype(float)
+                max_abs = float(col_vals.abs().max())
+                scale = (0.8 / max_abs) if max_abs > 0 else 0.0
+                for sector, v in col_vals.items():
+                    key = str(sector).lower()
+                    out.setdefault(key, {})[factor] = round(float(v) * scale, 3)
+            return out or None
+        except Exception as e:
+            logger.warning(f"Sensitivity matrix conversion failed: {e}")
+            return None
 
 
 # ============================================

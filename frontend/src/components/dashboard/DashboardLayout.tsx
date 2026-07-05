@@ -27,7 +27,8 @@ import {
 import { cn } from "@/lib/utils";
 import { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { usePortfolios, usePaperTradingBalance } from "@/lib/hooks";
+import { usePortfolios, usePaperTradingBalance, useMarketStatus } from "@/lib/hooks";
+import { Brain } from "lucide-react";
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -35,11 +36,36 @@ interface DashboardLayoutProps {
 
 const navItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
+  { icon: Wallet, label: "Paper Trading", path: "/paper-trading" },
+  { icon: Brain, label: "AI Predictions", path: "/predictions" },
   { icon: PieChart, label: "Portfolio Builder", path: "/portfolio" },
   { icon: Search, label: "Causal Analysis", path: "/analysis" },
   { icon: Gamepad2, label: "Scenarios", path: "/simulator" },
-  { icon: Wallet, label: "Paper Trading", path: "/paper-trading" },
 ];
+
+const MARKET_STATUS_STYLES: Record<string, { dot: string; label: string }> = {
+  open: { dot: "bg-success animate-pulse", label: "Market Open" },
+  pre: { dot: "bg-warning", label: "Pre-Market" },
+  post: { dot: "bg-warning", label: "After Hours" },
+  closed: { dot: "bg-muted-foreground", label: "Market Closed" },
+};
+
+function MarketStatusBadge() {
+  const { data } = useMarketStatus();
+  const state = data?.status?.state || "closed";
+  const style = MARKET_STATUS_STYLES[state] || MARKET_STATUS_STYLES.closed;
+  return (
+    <div className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-border bg-background text-xs font-medium">
+      <span className={cn("w-2 h-2 rounded-full", style.dot)} />
+      <span>{style.label}</span>
+      {data?.status?.local_time_et && (
+        <span className="text-muted-foreground hidden md:inline">
+          {data.status.local_time_et.slice(11, 16)} ET
+        </span>
+      )}
+    </div>
+  );
+}
 
 export function DashboardLayout({ children }: DashboardLayoutProps) {
   const [collapsed, setCollapsed] = useState(false);
@@ -51,21 +77,24 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   const { data: portfoliosData } = usePortfolios();
   const { data: balanceData } = usePaperTradingBalance();
   
-  // Calculate total portfolio value
+  // Calculate total account value: unallocated cash + portfolio cash + holdings at cost
   const portfolioStats = useMemo(() => {
     const portfolios = portfoliosData?.portfolios || [];
-    const balance = balanceData?.balance || { cash_balance: 0, total_invested: 0, total_value: 0 };
-    
-    // Sum up all portfolio values
-    const totalValue = balance.total_value || (balance.cash_balance + balance.total_invested);
-    
-    // Calculate mock return (we'd need historical data for real calculation)
-    const portfolioCount = portfolios.length;
-    
+    const userCash = balanceData?.cash_balance || 0;
+
+    let invested = 0;
+    for (const p of portfolios) {
+      invested += (p as { cash_balance?: number }).cash_balance || 0;
+      const holdings = (p as { holdings?: Record<string, { shares: number; avg_cost: number }> }).holdings || {};
+      for (const pos of Object.values(holdings)) {
+        invested += (pos.shares || 0) * (pos.avg_cost || 0);
+      }
+    }
+
     return {
-      totalValue,
-      portfolioCount,
-      cashBalance: balance.cash_balance || 0,
+      totalValue: userCash + invested,
+      portfolioCount: portfolios.length,
+      cashBalance: userCash,
     };
   }, [portfoliosData, balanceData]);
 
@@ -199,6 +228,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
             </h1>
           </div>
           <div className="flex items-center gap-3">
+            <MarketStatusBadge />
             <Button variant="ghost" size="icon" className="relative">
               <Bell className="w-5 h-5" />
               <span className="absolute top-1 right-1 w-2 h-2 bg-destructive rounded-full" />

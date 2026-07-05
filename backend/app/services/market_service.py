@@ -1,184 +1,160 @@
 """
-Market Data Service
-Integrates with free APIs: Yahoo Finance (yfinance), FRED, Alpha Vantage
-With caching to reduce API calls and avoid rate limiting
-Includes comprehensive fallback data for when APIs are rate limited
+Market Data Service (rebuilt)
+=============================
+Near-real-time market data built on batched Yahoo Finance requests + FRED.
+
+Principles:
+- ONE batched download serves a whole watchlist (no per-symbol .info loops).
+- Short TTL caches during market hours, longer when the market is closed.
+- Every payload is honestly labeled with `source` ('live' | 'cached') and
+  `as_of`. If data cannot be fetched we serve the last cached value marked
+  stale, or return an explicit error - we never fabricate prices, volumes,
+  PE ratios, or news.
 """
 
 import os
+import time
+import logging
+import threading
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
-import logging
-from functools import lru_cache
-import time
-import random
+from zoneinfo import ZoneInfo
+
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-# Simple in-memory cache with TTL
+EASTERN = ZoneInfo('America/New_York')
+
+# ---------------------------------------------------------------------------
+# Cache (in-memory, TTL based, thread-safe enough for a single Flask worker)
+# ---------------------------------------------------------------------------
 _cache: Dict[str, Any] = {}
 _cache_timestamps: Dict[str, float] = {}
+_cache_lock = threading.Lock()
 
-# Comprehensive fallback stock data for when Yahoo Finance is rate limited
-FALLBACK_STOCK_DATA = {
-    # Tech giants
-    'AAPL': {'name': 'Apple Inc.', 'price': 185.92, 'sector': 'Technology', 'market_cap': 2890000000000},
-    'MSFT': {'name': 'Microsoft Corporation', 'price': 378.91, 'sector': 'Technology', 'market_cap': 2810000000000},
-    'GOOGL': {'name': 'Alphabet Inc.', 'price': 141.80, 'sector': 'Technology', 'market_cap': 1780000000000},
-    'AMZN': {'name': 'Amazon.com Inc.', 'price': 186.51, 'sector': 'Consumer Cyclical', 'market_cap': 1940000000000},
-    'META': {'name': 'Meta Platforms Inc.', 'price': 531.12, 'sector': 'Technology', 'market_cap': 1370000000000},
-    'NVDA': {'name': 'NVIDIA Corporation', 'price': 495.22, 'sector': 'Technology', 'market_cap': 1220000000000},
-    'TSLA': {'name': 'Tesla Inc.', 'price': 248.48, 'sector': 'Consumer Cyclical', 'market_cap': 791000000000},
-    
-    # More tech
-    'AMD': {'name': 'Advanced Micro Devices', 'price': 147.41, 'sector': 'Technology', 'market_cap': 238000000000},
-    'INTC': {'name': 'Intel Corporation', 'price': 48.73, 'sector': 'Technology', 'market_cap': 207000000000},
-    'CRM': {'name': 'Salesforce Inc.', 'price': 273.44, 'sector': 'Technology', 'market_cap': 265000000000},
-    'ADBE': {'name': 'Adobe Inc.', 'price': 580.77, 'sector': 'Technology', 'market_cap': 260000000000},
-    'ORCL': {'name': 'Oracle Corporation', 'price': 118.52, 'sector': 'Technology', 'market_cap': 325000000000},
-    'CSCO': {'name': 'Cisco Systems Inc.', 'price': 50.62, 'sector': 'Technology', 'market_cap': 204000000000},
-    'QCOM': {'name': 'QUALCOMM Inc.', 'price': 146.49, 'sector': 'Technology', 'market_cap': 163000000000},
-    'TXN': {'name': 'Texas Instruments', 'price': 169.81, 'sector': 'Technology', 'market_cap': 154000000000},
-    'NFLX': {'name': 'Netflix Inc.', 'price': 486.88, 'sector': 'Communication Services', 'market_cap': 214000000000},
-    
-    # Finance
-    'JPM': {'name': 'JPMorgan Chase & Co.', 'price': 170.12, 'sector': 'Financial Services', 'market_cap': 489000000000},
-    'BAC': {'name': 'Bank of America Corp', 'price': 33.94, 'sector': 'Financial Services', 'market_cap': 267000000000},
-    'WFC': {'name': 'Wells Fargo & Co', 'price': 49.08, 'sector': 'Financial Services', 'market_cap': 175000000000},
-    'GS': {'name': 'Goldman Sachs Group', 'price': 387.54, 'sector': 'Financial Services', 'market_cap': 127000000000},
-    'MS': {'name': 'Morgan Stanley', 'price': 93.25, 'sector': 'Financial Services', 'market_cap': 152000000000},
-    'V': {'name': 'Visa Inc.', 'price': 260.35, 'sector': 'Financial Services', 'market_cap': 534000000000},
-    'MA': {'name': 'Mastercard Inc.', 'price': 425.82, 'sector': 'Financial Services', 'market_cap': 399000000000},
-    
-    # Healthcare
-    'JNJ': {'name': 'Johnson & Johnson', 'price': 156.74, 'sector': 'Healthcare', 'market_cap': 378000000000},
-    'UNH': {'name': 'UnitedHealth Group', 'price': 527.72, 'sector': 'Healthcare', 'market_cap': 486000000000},
-    'PFE': {'name': 'Pfizer Inc.', 'price': 28.79, 'sector': 'Healthcare', 'market_cap': 162000000000},
-    'MRK': {'name': 'Merck & Co Inc.', 'price': 109.16, 'sector': 'Healthcare', 'market_cap': 276000000000},
-    'ABBV': {'name': 'AbbVie Inc.', 'price': 154.97, 'sector': 'Healthcare', 'market_cap': 274000000000},
-    'TMO': {'name': 'Thermo Fisher Scientific', 'price': 531.16, 'sector': 'Healthcare', 'market_cap': 204000000000},
-    'ABT': {'name': 'Abbott Laboratories', 'price': 110.65, 'sector': 'Healthcare', 'market_cap': 192000000000},
-    'LLY': {'name': 'Eli Lilly and Co', 'price': 582.34, 'sector': 'Healthcare', 'market_cap': 553000000000},
-    
-    # Consumer
-    'WMT': {'name': 'Walmart Inc.', 'price': 162.48, 'sector': 'Consumer Defensive', 'market_cap': 438000000000},
-    'PG': {'name': 'Procter & Gamble Co', 'price': 147.88, 'sector': 'Consumer Defensive', 'market_cap': 348000000000},
-    'KO': {'name': 'Coca-Cola Company', 'price': 59.51, 'sector': 'Consumer Defensive', 'market_cap': 257000000000},
-    'PEP': {'name': 'PepsiCo Inc.', 'price': 169.94, 'sector': 'Consumer Defensive', 'market_cap': 233000000000},
-    'COST': {'name': 'Costco Wholesale', 'price': 591.03, 'sector': 'Consumer Defensive', 'market_cap': 262000000000},
-    'HD': {'name': 'Home Depot Inc.', 'price': 348.63, 'sector': 'Consumer Cyclical', 'market_cap': 346000000000},
-    'NKE': {'name': 'Nike Inc.', 'price': 106.73, 'sector': 'Consumer Cyclical', 'market_cap': 162000000000},
-    'DIS': {'name': 'Walt Disney Company', 'price': 91.28, 'sector': 'Communication Services', 'market_cap': 167000000000},
-    'MCD': {'name': "McDonald's Corp", 'price': 295.68, 'sector': 'Consumer Cyclical', 'market_cap': 213000000000},
-    'SBUX': {'name': 'Starbucks Corp', 'price': 94.55, 'sector': 'Consumer Cyclical', 'market_cap': 108000000000},
-    
-    # Energy
-    'XOM': {'name': 'Exxon Mobil Corp', 'price': 103.68, 'sector': 'Energy', 'market_cap': 413000000000},
-    'CVX': {'name': 'Chevron Corporation', 'price': 149.72, 'sector': 'Energy', 'market_cap': 275000000000},
-    'COP': {'name': 'ConocoPhillips', 'price': 116.54, 'sector': 'Energy', 'market_cap': 135000000000},
-    
-    # Telecom
-    'VZ': {'name': 'Verizon Communications', 'price': 37.85, 'sector': 'Communication Services', 'market_cap': 159000000000},
-    'T': {'name': 'AT&T Inc.', 'price': 16.93, 'sector': 'Communication Services', 'market_cap': 121000000000},
-    'CMCSA': {'name': 'Comcast Corporation', 'price': 43.56, 'sector': 'Communication Services', 'market_cap': 170000000000},
-    
-    # Industrial
-    'CAT': {'name': 'Caterpillar Inc.', 'price': 294.61, 'sector': 'Industrials', 'market_cap': 145000000000},
-    'BA': {'name': 'Boeing Company', 'price': 206.44, 'sector': 'Industrials', 'market_cap': 124000000000},
-    'GE': {'name': 'General Electric Co', 'price': 127.39, 'sector': 'Industrials', 'market_cap': 139000000000},
-    'UPS': {'name': 'United Parcel Service', 'price': 156.88, 'sector': 'Industrials', 'market_cap': 134000000000},
-    'RTX': {'name': 'RTX Corporation', 'price': 91.67, 'sector': 'Industrials', 'market_cap': 122000000000},
-    
-    # ETFs
-    'SPY': {'name': 'SPDR S&P 500 ETF', 'price': 478.68, 'sector': 'ETF', 'market_cap': 0},
-    'QQQ': {'name': 'Invesco QQQ Trust', 'price': 405.38, 'sector': 'ETF', 'market_cap': 0},
-    'IWM': {'name': 'iShares Russell 2000 ETF', 'price': 197.46, 'sector': 'ETF', 'market_cap': 0},
-    'DIA': {'name': 'SPDR Dow Jones Industrial', 'price': 378.55, 'sector': 'ETF', 'market_cap': 0},
-    'VTI': {'name': 'Vanguard Total Stock Market', 'price': 239.87, 'sector': 'ETF', 'market_cap': 0},
-    'VOO': {'name': 'Vanguard S&P 500 ETF', 'price': 440.12, 'sector': 'ETF', 'market_cap': 0},
-    'ARKK': {'name': 'ARK Innovation ETF', 'price': 48.32, 'sector': 'ETF', 'market_cap': 0},
-    
-    # Sector ETFs
-    'XLK': {'name': 'Technology Select Sector', 'price': 191.42, 'sector': 'ETF', 'market_cap': 0},
-    'XLF': {'name': 'Financial Select Sector', 'price': 39.28, 'sector': 'ETF', 'market_cap': 0},
-    'XLE': {'name': 'Energy Select Sector', 'price': 86.73, 'sector': 'ETF', 'market_cap': 0},
-    'XLV': {'name': 'Health Care Select Sector', 'price': 139.55, 'sector': 'ETF', 'market_cap': 0},
-    'XLI': {'name': 'Industrial Select Sector', 'price': 117.32, 'sector': 'ETF', 'market_cap': 0},
-    'XLY': {'name': 'Consumer Discretionary Select', 'price': 184.65, 'sector': 'ETF', 'market_cap': 0},
-    'XLP': {'name': 'Consumer Staples Select', 'price': 75.89, 'sector': 'ETF', 'market_cap': 0},
-    'XLU': {'name': 'Utilities Select Sector', 'price': 68.41, 'sector': 'ETF', 'market_cap': 0},
-    'XLB': {'name': 'Materials Select Sector', 'price': 86.22, 'sector': 'ETF', 'market_cap': 0},
-    'XLRE': {'name': 'Real Estate Select Sector', 'price': 39.67, 'sector': 'ETF', 'market_cap': 0},
-    'XLC': {'name': 'Communication Services Select', 'price': 78.95, 'sector': 'ETF', 'market_cap': 0},
-    
-    # Additional popular stocks
-    'BRK-B': {'name': 'Berkshire Hathaway B', 'price': 362.27, 'sector': 'Financial Services', 'market_cap': 789000000000},
-    'AVGO': {'name': 'Broadcom Inc.', 'price': 1108.23, 'sector': 'Technology', 'market_cap': 458000000000},
-    'PYPL': {'name': 'PayPal Holdings', 'price': 62.15, 'sector': 'Financial Services', 'market_cap': 66000000000},
-    'SQ': {'name': 'Block Inc.', 'price': 72.36, 'sector': 'Technology', 'market_cap': 43000000000},
-    'SHOP': {'name': 'Shopify Inc.', 'price': 77.82, 'sector': 'Technology', 'market_cap': 98000000000},
-    'UBER': {'name': 'Uber Technologies', 'price': 61.55, 'sector': 'Technology', 'market_cap': 127000000000},
-    'SNAP': {'name': 'Snap Inc.', 'price': 16.84, 'sector': 'Communication Services', 'market_cap': 27000000000},
-    'ROKU': {'name': 'Roku Inc.', 'price': 89.45, 'sector': 'Communication Services', 'market_cap': 12000000000},
-    'COIN': {'name': 'Coinbase Global', 'price': 147.33, 'sector': 'Financial Services', 'market_cap': 35000000000},
-    'PLTR': {'name': 'Palantir Technologies', 'price': 17.82, 'sector': 'Technology', 'market_cap': 38000000000},
-    'RIVN': {'name': 'Rivian Automotive', 'price': 18.25, 'sector': 'Consumer Cyclical', 'market_cap': 18000000000},
-    'LCID': {'name': 'Lucid Group Inc.', 'price': 4.82, 'sector': 'Consumer Cyclical', 'market_cap': 11000000000},
-    'F': {'name': 'Ford Motor Company', 'price': 11.85, 'sector': 'Consumer Cyclical', 'market_cap': 47000000000},
-    'GM': {'name': 'General Motors Co', 'price': 35.42, 'sector': 'Consumer Cyclical', 'market_cap': 48000000000},
-    'AA': {'name': 'Alcoa Corporation', 'price': 31.25, 'sector': 'Basic Materials', 'market_cap': 5600000000},
-    'AAP': {'name': 'Advance Auto Parts', 'price': 64.38, 'sector': 'Consumer Cyclical', 'market_cap': 3800000000},
-    'A': {'name': 'Agilent Technologies', 'price': 135.67, 'sector': 'Healthcare', 'market_cap': 39000000000},
-}
-
-def get_fallback_quote(symbol: str) -> Optional[Dict[str, Any]]:
-    """Get fallback quote data for a symbol"""
-    symbol = symbol.upper()
-    if symbol in FALLBACK_STOCK_DATA:
-        data = FALLBACK_STOCK_DATA[symbol]
-        # Add small random variation to make it look "live"
-        price_variation = data['price'] * random.uniform(-0.005, 0.005)
-        current_price = round(data['price'] + price_variation, 2)
-        change_pct = round(random.uniform(-2.5, 2.5), 2)
-        change = round(current_price * change_pct / 100, 2)
-        
-        return {
-            'symbol': symbol,
-            'price': current_price,
-            'change': change,
-            'change_percent': change_pct,
-            'volume': random.randint(1000000, 50000000),
-            'market_cap': data['market_cap'],
-            'pe_ratio': round(random.uniform(15, 35), 2),
-            'dividend_yield': round(random.uniform(0, 3), 2) if data['sector'] != 'ETF' else None,
-            'fifty_two_week_high': round(current_price * 1.15, 2),
-            'fifty_two_week_low': round(current_price * 0.75, 2),
-            'day_high': round(current_price * 1.01, 2),
-            'day_low': round(current_price * 0.99, 2),
-            'name': data['name'],
-            'sector': data['sector'],
-            'timestamp': datetime.now().isoformat(),
-            'source': 'fallback'
-        }
-    return None
 
 def get_cached(key: str, ttl_seconds: int = 300) -> Optional[Any]:
-    """Get value from cache if not expired"""
-    if key in _cache and key in _cache_timestamps:
-        if time.time() - _cache_timestamps[key] < ttl_seconds:
-            logger.debug(f"Cache hit for {key}")
+    with _cache_lock:
+        if key in _cache and time.time() - _cache_timestamps.get(key, 0) < ttl_seconds:
             return _cache[key]
     return None
 
-def set_cached(key: str, value: Any) -> None:
-    """Set value in cache with current timestamp"""
-    _cache[key] = value
-    _cache_timestamps[key] = time.time()
 
-# Sector ETF symbols
+def get_cached_stale(key: str) -> Optional[Any]:
+    """Return a cached value regardless of age (for graceful degradation)."""
+    with _cache_lock:
+        return _cache.get(key)
+
+
+def set_cached(key: str, value: Any) -> None:
+    with _cache_lock:
+        _cache[key] = value
+        _cache_timestamps[key] = time.time()
+
+
+# ---------------------------------------------------------------------------
+# Symbol directory - names/sectors for search & display ranking ONLY.
+# Never a source of prices.
+# ---------------------------------------------------------------------------
+SYMBOL_DIRECTORY: Dict[str, Dict[str, Any]] = {
+    # Tech
+    'AAPL': {'name': 'Apple Inc.', 'sector': 'Technology'},
+    'MSFT': {'name': 'Microsoft Corporation', 'sector': 'Technology'},
+    'GOOGL': {'name': 'Alphabet Inc.', 'sector': 'Technology'},
+    'AMZN': {'name': 'Amazon.com Inc.', 'sector': 'Consumer Cyclical'},
+    'META': {'name': 'Meta Platforms Inc.', 'sector': 'Technology'},
+    'NVDA': {'name': 'NVIDIA Corporation', 'sector': 'Technology'},
+    'TSLA': {'name': 'Tesla Inc.', 'sector': 'Consumer Cyclical'},
+    'AMD': {'name': 'Advanced Micro Devices', 'sector': 'Technology'},
+    'INTC': {'name': 'Intel Corporation', 'sector': 'Technology'},
+    'CRM': {'name': 'Salesforce Inc.', 'sector': 'Technology'},
+    'ADBE': {'name': 'Adobe Inc.', 'sector': 'Technology'},
+    'ORCL': {'name': 'Oracle Corporation', 'sector': 'Technology'},
+    'CSCO': {'name': 'Cisco Systems Inc.', 'sector': 'Technology'},
+    'QCOM': {'name': 'QUALCOMM Inc.', 'sector': 'Technology'},
+    'TXN': {'name': 'Texas Instruments', 'sector': 'Technology'},
+    'AVGO': {'name': 'Broadcom Inc.', 'sector': 'Technology'},
+    'NFLX': {'name': 'Netflix Inc.', 'sector': 'Communication Services'},
+    'SHOP': {'name': 'Shopify Inc.', 'sector': 'Technology'},
+    'SQ': {'name': 'Block Inc.', 'sector': 'Technology'},
+    'PYPL': {'name': 'PayPal Holdings', 'sector': 'Financial Services'},
+    # Financials
+    'JPM': {'name': 'JPMorgan Chase & Co.', 'sector': 'Financial Services'},
+    'BAC': {'name': 'Bank of America Corp', 'sector': 'Financial Services'},
+    'WFC': {'name': 'Wells Fargo & Co', 'sector': 'Financial Services'},
+    'GS': {'name': 'Goldman Sachs Group', 'sector': 'Financial Services'},
+    'MS': {'name': 'Morgan Stanley', 'sector': 'Financial Services'},
+    'V': {'name': 'Visa Inc.', 'sector': 'Financial Services'},
+    'MA': {'name': 'Mastercard Inc.', 'sector': 'Financial Services'},
+    'BRK-B': {'name': 'Berkshire Hathaway B', 'sector': 'Financial Services'},
+    # Healthcare
+    'JNJ': {'name': 'Johnson & Johnson', 'sector': 'Healthcare'},
+    'UNH': {'name': 'UnitedHealth Group', 'sector': 'Healthcare'},
+    'PFE': {'name': 'Pfizer Inc.', 'sector': 'Healthcare'},
+    'MRK': {'name': 'Merck & Co Inc.', 'sector': 'Healthcare'},
+    'ABBV': {'name': 'AbbVie Inc.', 'sector': 'Healthcare'},
+    'TMO': {'name': 'Thermo Fisher Scientific', 'sector': 'Healthcare'},
+    'ABT': {'name': 'Abbott Laboratories', 'sector': 'Healthcare'},
+    'LLY': {'name': 'Eli Lilly and Co', 'sector': 'Healthcare'},
+    # Consumer
+    'WMT': {'name': 'Walmart Inc.', 'sector': 'Consumer Defensive'},
+    'PG': {'name': 'Procter & Gamble Co', 'sector': 'Consumer Defensive'},
+    'KO': {'name': 'Coca-Cola Company', 'sector': 'Consumer Defensive'},
+    'PEP': {'name': 'PepsiCo Inc.', 'sector': 'Consumer Defensive'},
+    'COST': {'name': 'Costco Wholesale', 'sector': 'Consumer Defensive'},
+    'HD': {'name': 'Home Depot Inc.', 'sector': 'Consumer Cyclical'},
+    'NKE': {'name': 'Nike Inc.', 'sector': 'Consumer Cyclical'},
+    'DIS': {'name': 'Walt Disney Company', 'sector': 'Communication Services'},
+    'MCD': {'name': "McDonald's Corp", 'sector': 'Consumer Cyclical'},
+    'SBUX': {'name': 'Starbucks Corp', 'sector': 'Consumer Cyclical'},
+    # Energy / Industrials / Telecom
+    'XOM': {'name': 'Exxon Mobil Corp', 'sector': 'Energy'},
+    'CVX': {'name': 'Chevron Corporation', 'sector': 'Energy'},
+    'COP': {'name': 'ConocoPhillips', 'sector': 'Energy'},
+    'CAT': {'name': 'Caterpillar Inc.', 'sector': 'Industrials'},
+    'BA': {'name': 'Boeing Company', 'sector': 'Industrials'},
+    'GE': {'name': 'GE Aerospace', 'sector': 'Industrials'},
+    'UPS': {'name': 'United Parcel Service', 'sector': 'Industrials'},
+    'RTX': {'name': 'RTX Corporation', 'sector': 'Industrials'},
+    'VZ': {'name': 'Verizon Communications', 'sector': 'Communication Services'},
+    'T': {'name': 'AT&T Inc.', 'sector': 'Communication Services'},
+    'CMCSA': {'name': 'Comcast Corporation', 'sector': 'Communication Services'},
+    # Utilities / REIT / Materials
+    'NEE': {'name': 'NextEra Energy', 'sector': 'Utilities'},
+    'DUK': {'name': 'Duke Energy', 'sector': 'Utilities'},
+    'SO': {'name': 'Southern Company', 'sector': 'Utilities'},
+    'AMT': {'name': 'American Tower', 'sector': 'Real Estate'},
+    'PLD': {'name': 'Prologis', 'sector': 'Real Estate'},
+    'SPG': {'name': 'Simon Property Group', 'sector': 'Real Estate'},
+    'LIN': {'name': 'Linde plc', 'sector': 'Materials'},
+    'APD': {'name': 'Air Products', 'sector': 'Materials'},
+    'DD': {'name': 'DuPont de Nemours', 'sector': 'Materials'},
+    # Broad ETFs
+    'SPY': {'name': 'SPDR S&P 500 ETF', 'sector': 'ETF'},
+    'QQQ': {'name': 'Invesco QQQ Trust', 'sector': 'ETF'},
+    'IWM': {'name': 'iShares Russell 2000 ETF', 'sector': 'ETF'},
+    'DIA': {'name': 'SPDR Dow Jones Industrial', 'sector': 'ETF'},
+    'VTI': {'name': 'Vanguard Total Stock Market', 'sector': 'ETF'},
+    'VOO': {'name': 'Vanguard S&P 500 ETF', 'sector': 'ETF'},
+    'ARKK': {'name': 'ARK Innovation ETF', 'sector': 'ETF'},
+    # Sector ETFs
+    'XLK': {'name': 'Technology Select Sector', 'sector': 'ETF'},
+    'XLF': {'name': 'Financial Select Sector', 'sector': 'ETF'},
+    'XLE': {'name': 'Energy Select Sector', 'sector': 'ETF'},
+    'XLV': {'name': 'Health Care Select Sector', 'sector': 'ETF'},
+    'XLI': {'name': 'Industrial Select Sector', 'sector': 'ETF'},
+    'XLY': {'name': 'Consumer Discretionary Select', 'sector': 'ETF'},
+    'XLP': {'name': 'Consumer Staples Select', 'sector': 'ETF'},
+    'XLU': {'name': 'Utilities Select Sector', 'sector': 'ETF'},
+    'XLB': {'name': 'Materials Select Sector', 'sector': 'ETF'},
+    'XLRE': {'name': 'Real Estate Select Sector', 'sector': 'ETF'},
+    'XLC': {'name': 'Communication Services Select', 'sector': 'ETF'},
+}
+
 SECTOR_ETFS = {
     'XLK': 'Technology',
-    'XLV': 'Healthcare', 
+    'XLV': 'Healthcare',
     'XLE': 'Energy',
     'XLF': 'Financials',
     'XLI': 'Industrials',
@@ -187,10 +163,9 @@ SECTOR_ETFS = {
     'XLU': 'Utilities',
     'XLB': 'Materials',
     'XLRE': 'Real Estate',
-    'XLC': 'Communication Services'
+    'XLC': 'Communication Services',
 }
 
-# FRED series IDs for macroeconomic data
 FRED_SERIES = {
     'fed_rate': 'FEDFUNDS',
     'cpi': 'CPIAUCSL',
@@ -198,747 +173,675 @@ FRED_SERIES = {
     'unemployment': 'UNRATE',
     'vix': 'VIXCLS',
     'treasury_10y': 'DGS10',
-    'oil_wti': 'DCOILWTICO'
+    'oil_wti': 'DCOILWTICO',
 }
 
+TRENDING_SYMBOLS = ['NVDA', 'TSLA', 'AAPL', 'MSFT', 'AMZN', 'META', 'GOOGL', 'AMD', 'AVGO', 'NFLX', 'SPY', 'QQQ']
+
+
+# ---------------------------------------------------------------------------
+# Market clock
+# ---------------------------------------------------------------------------
+
+def get_market_status() -> Dict[str, Any]:
+    """US equity market session status (approximate - no holiday calendar)."""
+    now = datetime.now(EASTERN)
+    minutes = now.hour * 60 + now.minute
+    weekday = now.weekday() < 5
+    if not weekday:
+        state = 'closed'
+    elif 9 * 60 + 30 <= minutes < 16 * 60:
+        state = 'open'
+    elif 4 * 60 <= minutes < 9 * 60 + 30:
+        state = 'pre'
+    elif 16 * 60 <= minutes < 20 * 60:
+        state = 'post'
+    else:
+        state = 'closed'
+    return {
+        'state': state,
+        'is_open': state == 'open',
+        'local_time_et': now.strftime('%Y-%m-%d %H:%M:%S'),
+        'note': 'Session inferred from clock; US holidays not modeled',
+    }
+
+
+def _quote_ttl() -> int:
+    """Quote cache TTL: 30s during the session, 10 min otherwise."""
+    return 30 if get_market_status()['is_open'] else 600
+
+
+# ---------------------------------------------------------------------------
+# Batched quote snapshots
+# ---------------------------------------------------------------------------
+
+def _fetch_snapshot(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
+    """
+    One batched daily-bar download for all symbols. The last daily bar tracks
+    the live session intraday, so this gives price / change / range / volume
+    in a single request.
+    """
+    import yfinance as yf
+
+    raw = yf.download(
+        symbols, period='7d', interval='1d',
+        auto_adjust=False, progress=False, group_by='column', threads=True,
+    )
+    out: Dict[str, Dict[str, Any]] = {}
+    if raw is None or raw.empty:
+        return out
+    if not isinstance(raw.columns, pd.MultiIndex):
+        raw.columns = pd.MultiIndex.from_product([raw.columns, [symbols[0]]])
+
+    now_iso = datetime.now(EASTERN).isoformat()
+    for s in symbols:
+        try:
+            close = raw[('Close', s)].dropna()
+            if close.empty:
+                continue
+            price = float(close.iloc[-1])
+            prev = float(close.iloc[-2]) if len(close) > 1 else price
+            bar_date = close.index[-1]
+            vol = raw[('Volume', s)].dropna()
+            high = raw[('High', s)].dropna()
+            low = raw[('Low', s)].dropna()
+            out[s] = {
+                'symbol': s,
+                'price': round(price, 2),
+                'previous_close': round(prev, 2),
+                'change': round(price - prev, 2),
+                'change_percent': round((price - prev) / prev * 100, 2) if prev else 0.0,
+                'day_high': round(float(high.iloc[-1]), 2) if not high.empty else None,
+                'day_low': round(float(low.iloc[-1]), 2) if not low.empty else None,
+                'volume': int(vol.iloc[-1]) if not vol.empty else 0,
+                'bar_date': bar_date.strftime('%Y-%m-%d'),
+                'as_of': now_iso,
+                'source': 'live',
+            }
+        except Exception:
+            continue
+    return out
+
+
+def get_quotes(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
+    """
+    Batched quotes for a list of symbols with per-symbol caching.
+    Serves stale cached data (clearly marked) if the network fails.
+    """
+    symbols = [s.upper() for s in symbols if s]
+    ttl = _quote_ttl()
+    result: Dict[str, Dict[str, Any]] = {}
+    missing: List[str] = []
+
+    for s in symbols:
+        cached = get_cached(f'snap_{s}', ttl_seconds=ttl)
+        if cached:
+            result[s] = cached
+        else:
+            missing.append(s)
+
+    if missing:
+        try:
+            fresh = _fetch_snapshot(missing)
+            for s, q in fresh.items():
+                set_cached(f'snap_{s}', q)
+                result[s] = q
+        except Exception as e:
+            logger.warning(f"Snapshot fetch failed for {missing}: {e}")
+        # Anything still missing: serve stale cache, marked
+        for s in missing:
+            if s not in result:
+                stale = get_cached_stale(f'snap_{s}')
+                if stale:
+                    stale = dict(stale)
+                    stale['source'] = 'cached'
+                    result[s] = stale
+    return result
+
+
+def _get_symbol_meta(symbol: str) -> Dict[str, Any]:
+    """Slow-changing metadata (name, sector, market cap, PE) cached 24h."""
+    cache_key = f'meta_{symbol}'
+    cached = get_cached(cache_key, ttl_seconds=86400)
+    if cached:
+        return cached
+
+    meta = {
+        'name': SYMBOL_DIRECTORY.get(symbol, {}).get('name', symbol),
+        'sector': SYMBOL_DIRECTORY.get(symbol, {}).get('sector', 'N/A'),
+        'market_cap': None,
+        'pe_ratio': None,
+        'dividend_yield': None,
+        'fifty_two_week_high': None,
+        'fifty_two_week_low': None,
+    }
+    try:
+        import yfinance as yf
+        info = yf.Ticker(symbol).info or {}
+        meta.update({
+            'name': info.get('shortName') or info.get('longName') or meta['name'],
+            'sector': info.get('sector') or meta['sector'],
+            'market_cap': info.get('marketCap'),
+            'pe_ratio': info.get('trailingPE'),
+            'dividend_yield': info.get('dividendYield'),
+            'fifty_two_week_high': info.get('fiftyTwoWeekHigh'),
+            'fifty_two_week_low': info.get('fiftyTwoWeekLow'),
+        })
+    except Exception as e:
+        logger.debug(f"Metadata fetch failed for {symbol}: {e}")
+    set_cached(cache_key, meta)
+    return meta
+
+
+def get_real_time_quote(symbol: str) -> Optional[Dict[str, Any]]:
+    """Full quote (snapshot + metadata) for a single symbol."""
+    symbol = symbol.upper()
+    quotes = get_quotes([symbol])
+    snap = quotes.get(symbol)
+    if not snap:
+        return None
+    meta = _get_symbol_meta(symbol)
+    return {
+        **snap,
+        'name': meta['name'],
+        'sector': meta['sector'],
+        'market_cap': meta['market_cap'],
+        'pe_ratio': meta['pe_ratio'],
+        'dividend_yield': meta['dividend_yield'],
+        'fifty_two_week_high': meta['fifty_two_week_high'],
+        'fifty_two_week_low': meta['fifty_two_week_low'],
+        'timestamp': snap['as_of'],
+    }
+
+
+def get_fallback_quote(symbol: str) -> Optional[Dict[str, Any]]:
+    """
+    Compatibility shim (old code imported this). Returns the last cached
+    snapshot marked stale - never fabricated data.
+    """
+    stale = get_cached_stale(f'snap_{symbol.upper()}')
+    if stale:
+        stale = dict(stale)
+        stale['source'] = 'cached'
+        return stale
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Indicators / macro
+# ---------------------------------------------------------------------------
 
 def get_current_indicators() -> Dict[str, Any]:
-    """
-    Get current market indicators from multiple sources
-    Returns VIX, Fed Rate, CPI, and other key indicators
-    Cached for 5 minutes to reduce API calls
-    """
-    # Check cache first (5 minute TTL)
-    cached = get_cached('market_indicators', ttl_seconds=300)
+    """Key market indicators from one batched snapshot + FRED macro."""
+    cached = get_cached('market_indicators', ttl_seconds=_quote_ttl())
     if cached:
         return cached
-    
-    try:
-        import yfinance as yf
-        
-        indicators = {}
-        
-        # Get VIX from Yahoo Finance
-        try:
-            vix = yf.Ticker('^VIX')
-            vix_info = vix.info
-            indicators['vix'] = {
-                'value': round(vix_info.get('regularMarketPrice', 18.5), 2),
-                'change': round(vix_info.get('regularMarketChangePercent', 0), 2),
-                'label': 'VIX (Volatility)',
-                'trend': 'up' if vix_info.get('regularMarketChangePercent', 0) > 0 else 'down'
-            }
-        except Exception as e:
-            logger.warning(f"Failed to fetch VIX: {e}")
-            indicators['vix'] = {'value': 18.5, 'change': 0, 'label': 'VIX', 'trend': 'neutral'}
-        
-        # Get Treasury yield
-        try:
-            tlt = yf.Ticker('^TNX')  # 10-year Treasury yield
-            tlt_info = tlt.info
-            indicators['treasury_10y'] = {
-                'value': round(tlt_info.get('regularMarketPrice', 4.5), 2),
-                'change': round(tlt_info.get('regularMarketChangePercent', 0), 2),
-                'label': '10Y Treasury',
-                'unit': '%',
-                'trend': 'up' if tlt_info.get('regularMarketChangePercent', 0) > 0 else 'down'
-            }
-        except Exception as e:
-            logger.warning(f"Failed to fetch Treasury: {e}")
-            indicators['treasury_10y'] = {'value': 4.5, 'change': 0, 'label': '10Y Treasury', 'unit': '%', 'trend': 'neutral'}
-        
-        # Get S&P 500 performance
-        try:
-            spy = yf.Ticker('SPY')
-            spy_info = spy.info
-            indicators['sp500'] = {
-                'value': round(spy_info.get('regularMarketPrice', 4800), 2),
-                'change': round(spy_info.get('regularMarketChangePercent', 0), 2),
-                'label': 'S&P 500',
-                'trend': 'up' if spy_info.get('regularMarketChangePercent', 0) > 0 else 'down'
-            }
-        except Exception as e:
-            logger.warning(f"Failed to fetch S&P 500: {e}")
-            indicators['sp500'] = {'value': 4800, 'change': 0, 'label': 'S&P 500', 'trend': 'neutral'}
-        
-        # Add Fed rate (typically from FRED, using fallback)
+
+    indicators: Dict[str, Any] = {}
+    snaps = get_quotes(['SPY', '^VIX', '^TNX'])
+
+    def _ind(sym: str, label: str, unit: Optional[str] = None) -> Dict[str, Any]:
+        q = snaps.get(sym)
+        if not q:
+            return {'value': None, 'change': None, 'label': label, 'trend': 'neutral', 'unavailable': True}
+        d = {
+            'value': q['price'],
+            'change': q['change_percent'],
+            'label': label,
+            'trend': 'up' if q['change_percent'] > 0 else ('down' if q['change_percent'] < 0 else 'neutral'),
+            'as_of': q.get('bar_date'),
+            'source': q.get('source', 'live'),
+        }
+        if unit:
+            d['unit'] = unit
+        return d
+
+    indicators['sp500'] = _ind('SPY', 'S&P 500 (SPY)')
+    indicators['vix'] = _ind('^VIX', 'VIX (Volatility)')
+    indicators['treasury_10y'] = _ind('^TNX', '10Y Treasury', unit='%')
+
+    # Macro from FRED (real values with real dates when a key is configured)
+    macro = get_fred_data()
+    if macro.get('fed_rate', {}).get('value') is not None:
         indicators['fed_rate'] = {
-            'value': 4.5,
-            'label': 'Fed Funds Rate',
-            'unit': '%',
-            'trend': 'neutral'
+            'value': macro['fed_rate']['value'],
+            'label': 'Fed Funds Rate', 'unit': '%',
+            'as_of': macro['fed_rate'].get('date'),
+            'trend': 'neutral',
+            'source': 'fred' if not macro.get('is_fallback') else 'cached',
         }
-        
-        # Add CPI (typically from FRED, using fallback)
+    if macro.get('cpi_yoy', {}).get('value') is not None:
         indicators['cpi'] = {
-            'value': 3.2,
-            'change': -0.1,
-            'label': 'CPI (Inflation)',
-            'unit': '%',
-            'trend': 'down'
+            'value': macro['cpi_yoy']['value'],
+            'label': 'CPI Inflation (YoY)', 'unit': '%',
+            'as_of': macro['cpi_yoy'].get('date'),
+            'trend': 'neutral',
+            'source': 'fred' if not macro.get('is_fallback') else 'cached',
         }
-        
-        # Cache the result
-        set_cached('market_indicators', indicators)
-        return indicators
-        
-    except ImportError:
-        logger.error("yfinance not installed")
-        return _get_fallback_indicators()
-    except Exception as e:
-        logger.error(f"Error fetching indicators: {e}")
-        return _get_fallback_indicators()
+
+    set_cached('market_indicators', indicators)
+    return indicators
 
 
-def _get_fallback_indicators() -> Dict[str, Any]:
-    """Return fallback indicator values when APIs fail"""
-    return {
-        'vix': {'value': 18.5, 'change': 0, 'label': 'VIX', 'trend': 'neutral'},
-        'fed_rate': {'value': 4.5, 'label': 'Fed Funds Rate', 'unit': '%', 'trend': 'neutral'},
-        'cpi': {'value': 3.2, 'change': 0, 'label': 'CPI', 'unit': '%', 'trend': 'neutral'},
-        'treasury_10y': {'value': 4.5, 'change': 0, 'label': '10Y Treasury', 'unit': '%', 'trend': 'neutral'},
-        'sp500': {'value': 4800, 'change': 0, 'label': 'S&P 500', 'trend': 'neutral'}
+def get_fred_data(series: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Macro data from FRED. Computes CPI YoY inflation properly.
+    Without an API key, returns last-known values clearly marked as such.
+    """
+    cache_key = f'fred_{series or "all"}'
+    cached = get_cached(cache_key, ttl_seconds=6 * 3600)
+    if cached:
+        return cached
+
+    api_key = os.getenv('FRED_API_KEY')
+    if api_key:
+        try:
+            from fredapi import Fred
+            fred = Fred(api_key=api_key)
+
+            if series:
+                data = fred.get_series(series).dropna()
+                result = {
+                    'series': series,
+                    'value': round(float(data.iloc[-1]), 2) if not data.empty else None,
+                    'date': data.index[-1].strftime('%Y-%m-%d') if not data.empty else None,
+                }
+                set_cached(cache_key, result)
+                return result
+
+            result = {}
+            for name, sid in FRED_SERIES.items():
+                try:
+                    data = fred.get_series(sid).dropna()
+                    if data.empty:
+                        continue
+                    result[name] = {
+                        'series_id': sid,
+                        'value': round(float(data.iloc[-1]), 2),
+                        'date': data.index[-1].strftime('%Y-%m-%d'),
+                    }
+                    if name == 'cpi' and len(data) > 12:
+                        yoy = (data.iloc[-1] / data.iloc[-13] - 1) * 100
+                        result['cpi_yoy'] = {
+                            'series_id': sid,
+                            'value': round(float(yoy), 2),
+                            'date': data.index[-1].strftime('%Y-%m-%d'),
+                        }
+                except Exception as e:
+                    logger.warning(f"FRED series {sid} failed: {e}")
+            set_cached(cache_key, result)
+            return result
+        except Exception as e:
+            logger.error(f"FRED fetch failed: {e}")
+
+    # No key / failure: last-known values, clearly marked
+    fallback = {
+        'fed_rate': {'series_id': 'FEDFUNDS', 'value': 4.25, 'date': '2026-03-01'},
+        'cpi_yoy': {'series_id': 'CPIAUCSL', 'value': 2.8, 'date': '2026-02-01'},
+        'gdp': {'series_id': 'GDP', 'value': None, 'date': None},
+        'unemployment': {'series_id': 'UNRATE', 'value': 4.3, 'date': '2026-02-01'},
+        'is_fallback': True,
+        'note': 'FRED_API_KEY not configured - last-known values shown',
     }
+    if series:
+        for data in fallback.values():
+            if isinstance(data, dict) and data.get('series_id') == series:
+                return {'series': series, 'value': data['value'], 'date': data['date'], 'is_fallback': True}
+        return {'series': series, 'value': None, 'date': None, 'is_fallback': True}
+    return fallback
 
+
+# ---------------------------------------------------------------------------
+# Sectors / benchmark / history
+# ---------------------------------------------------------------------------
 
 def get_sector_performance(period: str = '1M') -> List[Dict[str, Any]]:
-    """
-    Get performance data for all sector ETFs
-    Cached for 10 minutes per period
-    """
-    # Check cache first (10 minute TTL)
+    """Performance of all 11 sector ETFs from one batched history download."""
     cache_key = f'sector_performance_{period}'
-    cached = get_cached(cache_key, ttl_seconds=600)
+    ttl = 60 if period == '1D' else 600
+    cached = get_cached(cache_key, ttl_seconds=ttl)
     if cached:
         return cached
-    
-    try:
-        import yfinance as yf
-        
-        # Map period to yfinance format
-        period_map = {
-            '1D': '1d',
-            '1W': '5d',
-            '1M': '1mo',
-            '3M': '3mo',
-            '1Y': '1y'
-        }
-        yf_period = period_map.get(period, '1mo')
-        
-        sectors = []
-        
-        for symbol, name in SECTOR_ETFS.items():
-            try:
-                ticker = yf.Ticker(symbol)
-                hist = ticker.history(period=yf_period)
-                
-                if not hist.empty:
-                    start_price = hist['Close'].iloc[0]
-                    end_price = hist['Close'].iloc[-1]
-                    change_pct = ((end_price - start_price) / start_price) * 100
-                    
-                    sectors.append({
-                        'symbol': symbol,
-                        'name': name,
-                        'price': round(end_price, 2),
-                        'change': round(end_price - start_price, 2),
-                        'change_percent': round(change_pct, 2),
-                        'volume': int(hist['Volume'].iloc[-1]) if 'Volume' in hist else 0
-                    })
-                else:
-                    sectors.append(_get_fallback_sector(symbol, name))
-            except Exception as e:
-                logger.warning(f"Failed to fetch {symbol}: {e}")
-                sectors.append(_get_fallback_sector(symbol, name))
-        
-        # Cache the result
+
+    symbols = list(SECTOR_ETFS.keys())
+    sectors: List[Dict[str, Any]] = []
+
+    if period == '1D':
+        snaps = get_quotes(symbols)
+        for sym, name in SECTOR_ETFS.items():
+            q = snaps.get(sym)
+            if q:
+                sectors.append({
+                    'symbol': sym, 'name': name,
+                    'price': q['price'], 'change': q['change'],
+                    'change_percent': q['change_percent'],
+                    'volume': q['volume'], 'source': q.get('source', 'live'),
+                })
+    else:
+        try:
+            from app.services.price_store import get_price_store
+            period_days = {'1W': 7, '1M': 30, '3M': 91, '1Y': 365}
+            days = period_days.get(period, 30)
+            start = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+            prices = get_price_store().get_history(symbols, start=start)
+            snaps = get_quotes(symbols)
+            for sym, name in SECTOR_ETFS.items():
+                if sym not in prices.columns:
+                    continue
+                series = prices[sym].dropna()
+                if series.empty:
+                    continue
+                start_price = float(series.iloc[0])
+                # Prefer live price for the endpoint
+                end_price = snaps.get(sym, {}).get('price') or float(series.iloc[-1])
+                change_pct = (end_price - start_price) / start_price * 100
+                sectors.append({
+                    'symbol': sym, 'name': name,
+                    'price': round(end_price, 2),
+                    'change': round(end_price - start_price, 2),
+                    'change_percent': round(change_pct, 2),
+                    'volume': snaps.get(sym, {}).get('volume', 0),
+                    'source': snaps.get(sym, {}).get('source', 'live'),
+                })
+        except Exception as e:
+            logger.error(f"Sector performance failed: {e}")
+
+    if sectors:
         set_cached(cache_key, sectors)
         return sectors
-        
-    except ImportError:
-        return [_get_fallback_sector(s, n) for s, n in SECTOR_ETFS.items()]
-    except Exception as e:
-        logger.error(f"Error fetching sector performance: {e}")
-        return [_get_fallback_sector(s, n) for s, n in SECTOR_ETFS.items()]
 
-
-def _get_fallback_sector(symbol: str, name: str) -> Dict[str, Any]:
-    """Return fallback sector data"""
-    return {
-        'symbol': symbol,
-        'name': name,
-        'price': 100,
-        'change': 0,
-        'change_percent': 0,
-        'volume': 0
-    }
+    stale = get_cached_stale(cache_key)
+    return stale if stale else []
 
 
 def get_historical_prices(
     symbol: str,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    interval: str = '1d'
+    interval: str = '1d',
 ) -> List[Dict[str, Any]]:
-    """
-    Get historical price data for a symbol
-    """
+    """Historical OHLCV. Daily data comes from the local price store."""
+    symbol = symbol.upper()
+    if not start_date:
+        start_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+    if not end_date:
+        end_date = datetime.now().strftime('%Y-%m-%d')
+
     try:
-        import yfinance as yf
-        
-        ticker = yf.Ticker(symbol)
-        
-        # Default to 1 year of data
-        if not start_date:
-            start_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
-        if not end_date:
-            end_date = datetime.now().strftime('%Y-%m-%d')
-        
-        hist = ticker.history(start=start_date, end=end_date, interval=interval)
-        
+        if interval == '1d':
+            from app.services.price_store import get_price_store
+            hist = get_price_store().get_ohlcv(symbol, start=start_date, end=end_date)
+        else:
+            import yfinance as yf
+            hist = yf.Ticker(symbol).history(start=start_date, end=end_date, interval=interval)
         data = []
         for date, row in hist.iterrows():
             data.append({
                 'date': date.strftime('%Y-%m-%d'),
-                'open': round(row['Open'], 2),
-                'high': round(row['High'], 2),
-                'low': round(row['Low'], 2),
-                'close': round(row['Close'], 2),
-                'volume': int(row['Volume'])
+                'open': round(float(row['Open']), 2),
+                'high': round(float(row['High']), 2),
+                'low': round(float(row['Low']), 2),
+                'close': round(float(row['Close']), 2),
+                'volume': int(row['Volume']) if row['Volume'] == row['Volume'] else 0,
             })
-        
         return data
-        
     except Exception as e:
-        logger.error(f"Error fetching historical prices for {symbol}: {e}")
+        logger.error(f"Historical prices failed for {symbol}: {e}")
         return []
 
 
-def get_fred_data(series: Optional[str] = None) -> Dict[str, Any]:
-    """
-    Get macroeconomic data from FRED API
-    Requires FRED_API_KEY environment variable
-    """
-    api_key = os.getenv('FRED_API_KEY')
-    
-    if not api_key:
-        logger.warning("FRED_API_KEY not set, using fallback data")
-        return _get_fallback_fred_data(series)
-    
-    try:
-        from fredapi import Fred
-        fred = Fred(api_key=api_key)
-        
-        if series:
-            # Get specific series
-            data = fred.get_series(series)
-            latest = data.dropna().iloc[-1] if not data.empty else None
-            return {
-                'series': series,
-                'value': round(float(latest), 2) if latest else None,
-                'date': data.index[-1].strftime('%Y-%m-%d') if latest else None
-            }
-        else:
-            # Get all common macro indicators
-            result = {}
-            for name, series_id in FRED_SERIES.items():
-                try:
-                    data = fred.get_series(series_id)
-                    if not data.empty:
-                        latest = data.dropna().iloc[-1]
-                        result[name] = {
-                            'series_id': series_id,
-                            'value': round(float(latest), 2),
-                            'date': data.index[-1].strftime('%Y-%m-%d')
-                        }
-                except Exception as e:
-                    logger.warning(f"Failed to fetch FRED series {series_id}: {e}")
-            return result
-            
-    except ImportError:
-        logger.error("fredapi not installed")
-        return _get_fallback_fred_data(series)
-    except Exception as e:
-        logger.error(f"Error fetching FRED data: {e}")
-        return _get_fallback_fred_data(series)
-
-
-def _get_fallback_fred_data(series: Optional[str] = None) -> Dict[str, Any]:
-    """Return fallback FRED data"""
-    fallback = {
-        'fed_rate': {'series_id': 'FEDFUNDS', 'value': 4.5, 'date': '2024-12-01'},
-        'cpi': {'series_id': 'CPIAUCSL', 'value': 3.2, 'date': '2024-11-01'},
-        'gdp': {'series_id': 'GDP', 'value': 2.8, 'date': '2024-09-01'},
-        'unemployment': {'series_id': 'UNRATE', 'value': 4.1, 'date': '2024-12-01'},
-        'vix': {'series_id': 'VIXCLS', 'value': 18.5, 'date': '2024-12-27'},
-        'treasury_10y': {'series_id': 'DGS10', 'value': 4.5, 'date': '2024-12-27'},
-        'oil_wti': {'series_id': 'DCOILWTICO', 'value': 72.5, 'date': '2024-12-27'}
-    }
-    
-    if series:
-        for name, data in fallback.items():
-            if data['series_id'] == series:
-                return {'series': series, 'value': data['value'], 'date': data['date']}
-        return {'series': series, 'value': None, 'date': None}
-    
-    return fallback
-
-
-def get_real_time_quote(symbol: str) -> Optional[Dict[str, Any]]:
-    """
-    Get real-time quote for a symbol with comprehensive fallback
-    """
-    symbol = symbol.upper()
-    
-    # Check cache first (30 second TTL for quotes)
-    cache_key = f'quote_{symbol}'
-    cached = get_cached(cache_key, ttl_seconds=30)
+def get_benchmark_data(period: str = '1Y') -> Dict[str, Any]:
+    """S&P 500 (SPY) benchmark performance from the price store."""
+    cache_key = f'benchmark_{period}'
+    cached = get_cached(cache_key, ttl_seconds=600)
     if cached:
         return cached
-    
-    try:
-        import yfinance as yf
-        
-        ticker = yf.Ticker(symbol)
-        info = ticker.info
-        
-        # Check if we got valid data
-        price = info.get('regularMarketPrice')
-        if price and price > 0:
-            result = {
-                'symbol': symbol,
-                'name': info.get('shortName', info.get('longName', symbol)),
-                'price': round(price, 2),
-                'change': round(info.get('regularMarketChange', 0), 2),
-                'change_percent': round(info.get('regularMarketChangePercent', 0), 2),
-                'volume': info.get('regularMarketVolume', 0),
-                'market_cap': info.get('marketCap', 0),
-                'pe_ratio': info.get('trailingPE'),
-                'dividend_yield': info.get('dividendYield'),
-                'fifty_two_week_high': info.get('fiftyTwoWeekHigh'),
-                'fifty_two_week_low': info.get('fiftyTwoWeekLow'),
-                'day_high': info.get('dayHigh'),
-                'day_low': info.get('dayLow'),
-                'sector': info.get('sector', 'N/A'),
-                'timestamp': datetime.now().isoformat(),
-                'source': 'live'
-            }
-            set_cached(cache_key, result)
-            return result
-        else:
-            # No valid price from API, use fallback
-            logger.warning(f"No valid price from yfinance for {symbol}, using fallback")
-            fallback = get_fallback_quote(symbol)
-            if fallback:
-                set_cached(cache_key, fallback)
-            return fallback
-        
-    except Exception as e:
-        logger.error(f"Error fetching quote for {symbol}: {e}")
-        # Return fallback data
-        fallback = get_fallback_quote(symbol)
-        if fallback:
-            set_cached(cache_key, fallback)
-        return fallback
 
-
-def get_benchmark_data(period: str = '1Y') -> Dict[str, Any]:
-    """
-    Get S&P 500 (SPY) benchmark performance data
-    """
     try:
-        import yfinance as yf
-        
-        period_map = {
-            '1M': '1mo',
-            '3M': '3mo',
-            '1Y': '1y',
-            'ALL': 'max'
-        }
-        yf_period = period_map.get(period, '1y')
-        
-        spy = yf.Ticker('SPY')
-        hist = spy.history(period=yf_period)
-        
-        if hist.empty:
-            return _get_fallback_benchmark()
-        
-        start_price = hist['Close'].iloc[0]
-        end_price = hist['Close'].iloc[-1]
-        total_return = ((end_price - start_price) / start_price) * 100
-        
-        # Calculate daily returns for volatility
-        hist['Return'] = hist['Close'].pct_change()
-        volatility = hist['Return'].std() * (252 ** 0.5) * 100  # Annualized
-        
-        # Build time series for charts
-        time_series = []
-        for date, row in hist.iterrows():
-            time_series.append({
-                'date': date.strftime('%Y-%m-%d'),
-                'close': round(row['Close'], 2),
-                'return_pct': round(((row['Close'] - start_price) / start_price) * 100, 2)
-            })
-        
-        return {
+        from app.services.price_store import get_price_store
+        period_days = {'1M': 30, '3M': 91, '1Y': 365, 'ALL': 5000}
+        days = period_days.get(period, 365)
+        start = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+        prices = get_price_store().get_history(['SPY'], start=start)
+        if prices.empty or 'SPY' not in prices.columns:
+            stale = get_cached_stale(cache_key)
+            return stale if stale else {'error': 'Benchmark data unavailable'}
+
+        series = prices['SPY'].dropna()
+        start_price = float(series.iloc[0])
+        end_price = float(series.iloc[-1])
+        returns = series.pct_change().dropna()
+        result = {
             'current_price': round(end_price, 2),
-            'total_return': round(total_return, 2),
-            'volatility': round(volatility, 2),
-            'time_series': time_series
+            'total_return': round((end_price - start_price) / start_price * 100, 2),
+            'volatility': round(float(returns.std()) * (252 ** 0.5) * 100, 2),
+            'time_series': [
+                {
+                    'date': d.strftime('%Y-%m-%d'),
+                    'close': round(float(v), 2),
+                    'return_pct': round((float(v) - start_price) / start_price * 100, 2),
+                }
+                for d, v in series.items()
+            ],
         }
-        
+        set_cached(cache_key, result)
+        return result
     except Exception as e:
-        logger.error(f"Error fetching benchmark data: {e}")
-        return _get_fallback_benchmark()
+        logger.error(f"Benchmark data failed: {e}")
+        stale = get_cached_stale(cache_key)
+        return stale if stale else {'error': 'Benchmark data unavailable'}
 
 
-def _get_fallback_benchmark() -> Dict[str, Any]:
-    """Return fallback benchmark data"""
-    return {
-        'current_price': 480,
-        'total_return': 12.5,
-        'volatility': 15.2,
-        'time_series': []
-    }
-
+# ---------------------------------------------------------------------------
+# Market condition / search / news / trending
+# ---------------------------------------------------------------------------
 
 def assess_market_condition() -> Dict[str, Any]:
-    """
-    Assess overall market condition based on multiple indicators
-    Returns: bullish, neutral, or bearish with supporting metrics
-    """
+    """Score market condition from VIX level, S&P trend, and yield move."""
     try:
         indicators = get_current_indicators()
-        
-        # Simple scoring system
         score = 0
         factors = []
-        
-        # VIX analysis (fear gauge)
-        vix_value = indicators.get('vix', {}).get('value', 20)
-        if vix_value < 15:
-            score += 2
-            factors.append('Low volatility (VIX < 15)')
-        elif vix_value < 20:
-            score += 1
-            factors.append('Normal volatility')
-        elif vix_value < 30:
-            score -= 1
-            factors.append('Elevated volatility')
-        else:
-            score -= 2
-            factors.append('High fear (VIX > 30)')
-        
-        # S&P 500 trend
-        sp500_change = indicators.get('sp500', {}).get('change', 0)
+
+        vix_value = indicators.get('vix', {}).get('value')
+        if vix_value is not None:
+            if vix_value < 15:
+                score += 2
+                factors.append('Low volatility (VIX < 15)')
+            elif vix_value < 20:
+                score += 1
+                factors.append('Normal volatility')
+            elif vix_value < 30:
+                score -= 1
+                factors.append('Elevated volatility')
+            else:
+                score -= 2
+                factors.append('High fear (VIX > 30)')
+
+        sp500_change = indicators.get('sp500', {}).get('change') or 0
         if sp500_change > 0:
             score += 1
-            factors.append('S&P 500 positive')
-        else:
+            factors.append('S&P 500 positive today')
+        elif sp500_change < 0:
             score -= 1
-            factors.append('S&P 500 negative')
-        
-        # Determine condition
+            factors.append('S&P 500 negative today')
+
         if score >= 2:
-            condition = 'bullish'
-            description = 'Market conditions are favorable for risk assets'
+            condition, description = 'bullish', 'Market conditions are favorable for risk assets'
         elif score <= -2:
-            condition = 'bearish'
-            description = 'Market conditions suggest caution'
+            condition, description = 'bearish', 'Market conditions suggest caution'
         else:
-            condition = 'neutral'
-            description = 'Mixed signals in the market'
-        
+            condition, description = 'neutral', 'Mixed signals in the market'
+
         return {
             'state': condition,
             'score': score,
             'description': description,
             'factors': factors,
             'indicators': indicators,
-            'timestamp': datetime.now().isoformat()
+            'market_status': get_market_status(),
+            'timestamp': datetime.now(EASTERN).isoformat(),
         }
-        
     except Exception as e:
-        logger.error(f"Error assessing market condition: {e}")
+        logger.error(f"Market condition assessment failed: {e}")
         return {
-            'state': 'neutral',
-            'score': 0,
+            'state': 'neutral', 'score': 0,
             'description': 'Unable to assess market conditions',
-            'factors': [],
-            'indicators': {},
-            'timestamp': datetime.now().isoformat()
+            'factors': [], 'indicators': {},
+            'timestamp': datetime.now(EASTERN).isoformat(),
         }
 
 
 def search_stocks(query: str) -> List[Dict[str, Any]]:
     """
-    Search for stocks by symbol or name
-    Returns list of matching stocks with current prices
-    Uses fallback data when Yahoo Finance is rate limited
+    Search by symbol or name. Matches the local directory first, then Yahoo
+    search for unknown symbols. Prices attached from one batched snapshot.
     """
     cache_key = f'stock_search_{query.upper()}'
-    cached = get_cached(cache_key, ttl_seconds=300)
+    cached = get_cached(cache_key, ttl_seconds=120)
     if cached:
         return cached
-    
-    query_upper = query.upper()
-    results = []
-    
-    # First, try to find matches in our fallback data
-    # This is fast and doesn't hit the API
-    for symbol, data in FALLBACK_STOCK_DATA.items():
-        if query_upper in symbol or query_upper.lower() in data['name'].lower():
-            fallback_quote = get_fallback_quote(symbol)
-            if fallback_quote:
-                results.append({
-                    'symbol': symbol,
-                    'name': data['name'],
-                    'price': fallback_quote['price'],
-                    'change': fallback_quote['change_percent'],
-                    'volume': fallback_quote['volume'],
-                    'market_cap': data['market_cap'],
-                    'sector': data['sector']
-                })
-            if len(results) >= 10:
-                break
-    
-    # Sort exact matches first
-    results.sort(key=lambda x: (0 if x['symbol'] == query_upper else 1, -x.get('market_cap', 0)))
-    
-    # Try to get live data from Yahoo Finance if we don't have many results
-    if len(results) < 5:
+
+    q = query.upper().strip()
+    matches: List[str] = []
+
+    for symbol, data in SYMBOL_DIRECTORY.items():
+        if q in symbol or query.lower() in data['name'].lower():
+            matches.append(symbol)
+    # Exact symbol first, then alphabetical
+    matches.sort(key=lambda s: (0 if s == q else 1, s))
+    matches = matches[:8]
+
+    # No exact directory hit? Ask Yahoo search (prefer US listings, no '.suffix')
+    if q not in SYMBOL_DIRECTORY and len(q) <= 6:
         try:
             import yfinance as yf
-            
-            # Try to fetch the exact symbol
-            if query_upper not in [r['symbol'] for r in results]:
-                try:
-                    ticker = yf.Ticker(query_upper)
-                    info = ticker.info
-                    price = info.get('regularMarketPrice')
-                    if price and price > 0:
-                        results.insert(0, {
-                            'symbol': query_upper,
-                            'name': info.get('shortName', info.get('longName', query_upper)),
-                            'price': round(price, 2),
-                            'change': round(info.get('regularMarketChangePercent', 0), 2),
-                            'volume': info.get('regularMarketVolume', 0),
-                            'market_cap': info.get('marketCap', 0),
-                            'sector': info.get('sector', 'N/A')
-                        })
-                except Exception as e:
-                    logger.debug(f"Could not fetch {query_upper} from yfinance: {e}")
-        except ImportError:
-            pass
+            found = yf.Search(q, max_results=8).quotes
+            found.sort(key=lambda i: ('.' in (i.get('symbol') or ''), (i.get('symbol') or '') != q))
+            for item in found:
+                sym = (item.get('symbol') or '').upper()
+                if sym and sym not in matches and item.get('quoteType') in ('EQUITY', 'ETF'):
+                    matches.insert(0, sym)
+                    if sym not in SYMBOL_DIRECTORY:
+                        SYMBOL_DIRECTORY[sym] = {
+                            'name': item.get('shortname') or item.get('longname') or sym,
+                            'sector': item.get('sector', 'N/A'),
+                        }
+                    break
         except Exception as e:
-            logger.warning(f"Error searching stocks via yfinance: {e}")
-    
+            logger.debug(f"Yahoo search failed for {q}: {e}")
+
+    snaps = get_quotes(matches[:10])
+    results = []
+    for sym in matches[:10]:
+        snap = snaps.get(sym)
+        entry = {
+            'symbol': sym,
+            'name': SYMBOL_DIRECTORY.get(sym, {}).get('name', sym),
+            'sector': SYMBOL_DIRECTORY.get(sym, {}).get('sector', 'N/A'),
+            'price': snap['price'] if snap else None,
+            'change': snap['change_percent'] if snap else None,
+            'volume': snap['volume'] if snap else None,
+            'source': snap.get('source') if snap else 'unavailable',
+        }
+        results.append(entry)
+
     set_cached(cache_key, results)
-    return results[:10]  # Limit to 10 results
+    return results
 
 
-def get_stock_news(symbol: str = None) -> List[Dict[str, Any]]:
-    """
-    Get financial news from Yahoo Finance
-    If symbol provided, get news for that stock
-    Otherwise get general market news
-    """
+def _parse_news_item(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Handle both old (flat) and new (nested 'content') yfinance news formats."""
+    try:
+        content = item.get('content', item)
+        title = content.get('title', '')
+        if not title:
+            return None
+        link = ''
+        if isinstance(content.get('canonicalUrl'), dict):
+            link = content['canonicalUrl'].get('url', '')
+        elif isinstance(content.get('clickThroughUrl'), dict):
+            link = content['clickThroughUrl'].get('url', '')
+        else:
+            link = item.get('link', '')
+        publisher = ''
+        if isinstance(content.get('provider'), dict):
+            publisher = content['provider'].get('displayName', '')
+        else:
+            publisher = item.get('publisher', '')
+        published = content.get('pubDate') or content.get('displayTime')
+        if not published and item.get('providerPublishTime'):
+            published = datetime.fromtimestamp(item['providerPublishTime']).isoformat()
+        thumbnail = None
+        thumb = content.get('thumbnail') or item.get('thumbnail')
+        if isinstance(thumb, dict):
+            resolutions = thumb.get('resolutions') or []
+            if resolutions:
+                thumbnail = resolutions[0].get('url')
+        return {
+            'title': title,
+            'summary': content.get('summary', content.get('description', '')),
+            'publisher': publisher,
+            'link': link,
+            'published': published,
+            'type': content.get('contentType', 'news'),
+            'thumbnail': thumbnail,
+            'related_tickers': item.get('relatedTickers', []),
+        }
+    except Exception:
+        return None
+
+
+def get_stock_news(symbol: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Real financial news from Yahoo. Returns [] if unavailable - no fake news."""
     cache_key = f'news_{symbol or "market"}'
-    cached = get_cached(cache_key, ttl_seconds=600)  # 10 minute cache
+    cached = get_cached(cache_key, ttl_seconds=600)
     if cached:
         return cached
-    
+
     try:
         import yfinance as yf
-        
-        # Get news from major index or specific stock
-        ticker_symbol = symbol if symbol else 'SPY'
-        ticker = yf.Ticker(ticker_symbol)
-        
+        ticker = yf.Ticker(symbol if symbol else 'SPY')
         news_items = []
-        try:
-            news = ticker.news
-            if news:
-                for item in news[:10]:  # Get top 10 news items
-                    news_items.append({
-                        'title': item.get('title', ''),
-                        'summary': item.get('summary', ''),
-                        'publisher': item.get('publisher', ''),
-                        'link': item.get('link', ''),
-                        'published': datetime.fromtimestamp(item.get('providerPublishTime', 0)).isoformat() if item.get('providerPublishTime') else None,
-                        'type': item.get('type', 'news'),
-                        'thumbnail': item.get('thumbnail', {}).get('resolutions', [{}])[0].get('url') if item.get('thumbnail') else None,
-                        'related_tickers': item.get('relatedTickers', [])
-                    })
-        except Exception as e:
-            logger.warning(f"Failed to fetch news for {ticker_symbol}: {e}")
-        
-        # If we couldn't get news, provide realistic fallback news items
-        if not news_items:
-            import random
-            
-            # Realistic financial news fallback items with actual links
-            fallback_news = [
-                {
-                    'title': 'Fed Officials Signal Cautious Approach to Rate Cuts',
-                    'summary': 'Federal Reserve policymakers emphasized data dependency in their approach to monetary policy, suggesting rate cuts may be gradual.',
-                    'publisher': 'Reuters',
-                    'link': 'https://www.reuters.com/markets/us/',
-                    'type': 'macro',
-                    'related_tickers': ['SPY', 'TLT', 'XLF']
-                },
-                {
-                    'title': 'Tech Stocks Rally on AI Optimism',
-                    'summary': 'Technology shares gained ground as investors bet on continued growth in artificial intelligence applications across industries.',
-                    'publisher': 'Bloomberg',
-                    'link': 'https://www.bloomberg.com/markets',
-                    'type': 'sector',
-                    'related_tickers': ['NVDA', 'MSFT', 'GOOGL', 'META']
-                },
-                {
-                    'title': 'Oil Prices Steady Amid Supply Concerns',
-                    'summary': 'Crude oil prices held near recent highs as traders weighed geopolitical risks against demand uncertainty.',
-                    'publisher': 'CNBC',
-                    'link': 'https://www.cnbc.com/energy/',
-                    'type': 'commodity',
-                    'related_tickers': ['XLE', 'USO', 'CVX', 'XOM']
-                },
-                {
-                    'title': 'Consumer Spending Shows Resilience',
-                    'summary': 'Retail sales data indicates consumers continue to spend despite economic headwinds, supporting growth outlook.',
-                    'publisher': 'Wall Street Journal',
-                    'link': 'https://www.wsj.com/economy',
-                    'type': 'economic',
-                    'related_tickers': ['XLY', 'AMZN', 'WMT', 'TGT']
-                },
-                {
-                    'title': 'Healthcare Sector Outperforms on Defensive Appeal',
-                    'summary': 'Healthcare stocks attracted investors seeking stability amid market volatility, with pharmaceutical companies leading gains.',
-                    'publisher': 'MarketWatch',
-                    'link': 'https://www.marketwatch.com/investing/sector/healthcare',
-                    'type': 'sector',
-                    'related_tickers': ['XLV', 'JNJ', 'UNH', 'PFE']
-                },
-                {
-                    'title': 'Treasury Yields Edge Higher on Economic Data',
-                    'summary': 'Bond yields rose as strong economic indicators reduced expectations for aggressive Fed rate cuts.',
-                    'publisher': 'Financial Times',
-                    'link': 'https://www.ft.com/markets',
-                    'type': 'bonds',
-                    'related_tickers': ['TLT', 'IEF', 'BND']
-                },
-                {
-                    'title': 'Semiconductor Stocks Surge on Chip Demand Forecast',
-                    'summary': 'Chipmakers posted gains after industry analysts raised demand forecasts for data center and AI processors.',
-                    'publisher': 'Barrons',
-                    'link': 'https://www.barrons.com/market-data',
-                    'type': 'sector',
-                    'related_tickers': ['NVDA', 'AMD', 'INTC', 'AVGO']
-                },
-                {
-                    'title': 'Banking Sector Faces Mixed Outlook',
-                    'summary': 'Financial stocks showed divergent performance as investors weighed interest rate impacts on net interest margins.',
-                    'publisher': 'Yahoo Finance',
-                    'link': 'https://finance.yahoo.com/sector/financial-services',
-                    'type': 'sector',
-                    'related_tickers': ['XLF', 'JPM', 'BAC', 'GS']
-                },
-            ]
-            
-            # Shuffle and pick 5-6 random news items
-            random.shuffle(fallback_news)
-            selected_news = fallback_news[:random.randint(5, 6)]
-            
-            # Add timestamps (staggered over past 24 hours)
-            for i, item in enumerate(selected_news):
-                hours_ago = i * 3 + random.randint(0, 2)
-                item['published'] = (datetime.now() - timedelta(hours=hours_ago)).isoformat()
-                item['thumbnail'] = None
-            
-            news_items = selected_news
-        
-        set_cached(cache_key, news_items)
+        for item in (ticker.news or [])[:12]:
+            parsed = _parse_news_item(item)
+            if parsed:
+                news_items.append(parsed)
+        if news_items:
+            set_cached(cache_key, news_items)
         return news_items
-        
     except Exception as e:
-        logger.error(f"Error fetching news: {e}")
-        return []
+        logger.error(f"News fetch failed: {e}")
+        stale = get_cached_stale(cache_key)
+        return stale if stale else []
 
 
 def get_trending_stocks() -> List[Dict[str, Any]]:
-    """
-    Get trending/most active stocks
-    Uses fallback data when Yahoo Finance is rate limited
-    """
-    cached = get_cached('trending_stocks', ttl_seconds=600)
+    """Most-active large caps from one batched snapshot, sorted by |move|."""
+    cached = get_cached('trending_stocks', ttl_seconds=_quote_ttl() * 2)
     if cached:
         return cached
-    
-    trending_symbols = ['AAPL', 'MSFT', 'NVDA', 'TSLA', 'AMZN', 'META', 'GOOGL', 'AMD', 'SPY', 'QQQ']
+
+    snaps = get_quotes(TRENDING_SYMBOLS)
     results = []
-    live_data_available = False
-    
-    try:
-        import yfinance as yf
-        
-        # Try to get live data for the first symbol to check if API is working
-        test_ticker = yf.Ticker('AAPL')
-        test_info = test_ticker.info
-        if test_info.get('regularMarketPrice') and test_info.get('regularMarketPrice') > 0:
-            live_data_available = True
-            
-            for symbol in trending_symbols:
-                try:
-                    ticker = yf.Ticker(symbol)
-                    info = ticker.info
-                    price = info.get('regularMarketPrice')
-                    if price and price > 0:
-                        results.append({
-                            'symbol': symbol,
-                            'name': info.get('shortName', symbol),
-                            'price': round(price, 2),
-                            'change': round(info.get('regularMarketChangePercent', 0), 2),
-                            'volume': info.get('regularMarketVolume', 0),
-                            'day_high': round(info.get('dayHigh', 0), 2),
-                            'day_low': round(info.get('dayLow', 0), 2),
-                            'source': 'live'
-                        })
-                except Exception:
-                    # If individual fetch fails, use fallback for this symbol
-                    fallback = get_fallback_quote(symbol)
-                    if fallback:
-                        results.append({
-                            'symbol': symbol,
-                            'name': fallback['name'],
-                            'price': fallback['price'],
-                            'change': fallback['change_percent'],
-                            'volume': fallback['volume'],
-                            'day_high': fallback['day_high'],
-                            'day_low': fallback['day_low'],
-                            'source': 'fallback'
-                        })
-    except Exception as e:
-        logger.warning(f"Yahoo Finance unavailable, using fallback data: {e}")
-    
-    # If we couldn't get live data, use fallback for all
-    if not live_data_available or len(results) < len(trending_symbols) // 2:
-        results = []
-        for symbol in trending_symbols:
-            fallback = get_fallback_quote(symbol)
-            if fallback:
-                results.append({
-                    'symbol': symbol,
-                    'name': fallback['name'],
-                    'price': fallback['price'],
-                    'change': fallback['change_percent'],
-                    'volume': fallback['volume'],
-                    'day_high': fallback['day_high'],
-                    'day_low': fallback['day_low'],
-                    'source': 'fallback'
-                })
-    
-    # Sort by absolute change to show most volatile
-    results.sort(key=lambda x: abs(x.get('change', 0)), reverse=True)
-    
-    set_cached('trending_stocks', results)
-    return results
+    for sym in TRENDING_SYMBOLS:
+        q = snaps.get(sym)
+        if not q:
+            continue
+        results.append({
+            'symbol': sym,
+            'name': SYMBOL_DIRECTORY.get(sym, {}).get('name', sym),
+            'price': q['price'],
+            'change': q['change_percent'],
+            'volume': q['volume'],
+            'day_high': q['day_high'],
+            'day_low': q['day_low'],
+            'source': q.get('source', 'live'),
+        })
+    results.sort(key=lambda x: abs(x.get('change') or 0), reverse=True)
+
+    if results:
+        set_cached('trending_stocks', results)
+        return results
+    stale = get_cached_stale('trending_stocks')
+    return stale if stale else []

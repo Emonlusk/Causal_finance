@@ -84,8 +84,28 @@ export function useMarketIndicators() {
   return useQuery({
     queryKey: ['marketIndicators'],
     queryFn: () => marketApi.getIndicators(),
-    staleTime: 60 * 1000, // 1 minute
-    refetchInterval: 5 * 60 * 1000, // Refetch every 5 minutes
+    staleTime: 30 * 1000,
+    refetchInterval: 60 * 1000, // Live refresh every minute
+  });
+}
+
+export function useMarketStatus() {
+  return useQuery({
+    queryKey: ['marketStatus'],
+    queryFn: () => marketApi.getMarketStatus(),
+    staleTime: 30 * 1000,
+    refetchInterval: 60 * 1000,
+  });
+}
+
+export function useBatchQuotes(symbols: string[], refetchMs: number = 30_000) {
+  const key = [...symbols].sort().join(',');
+  return useQuery({
+    queryKey: ['batchQuotes', key],
+    queryFn: () => marketApi.getBatchQuotes(symbols),
+    staleTime: 15 * 1000,
+    refetchInterval: refetchMs, // Live quote polling
+    enabled: symbols.length > 0,
   });
 }
 
@@ -118,7 +138,8 @@ export function useQuote(symbol: string) {
   return useQuery({
     queryKey: ['quote', symbol],
     queryFn: () => marketApi.getQuote(symbol),
-    staleTime: 60 * 1000,
+    staleTime: 20 * 1000,
+    refetchInterval: 30 * 1000, // Live quote refresh
     enabled: !!symbol,
   });
 }
@@ -307,7 +328,26 @@ export function usePortfolioHoldings(portfolioId: number) {
     queryKey: ['portfolioHoldings', portfolioId],
     queryFn: () => portfolioApi.getHoldings(portfolioId),
     enabled: portfolioId > 0 && isAuthenticated(),
-    staleTime: 60 * 1000, // 1 minute
+    staleTime: 20 * 1000,
+    refetchInterval: 30 * 1000, // Live position P&L
+  });
+}
+
+export function usePortfolioTrades(portfolioId: number, limit: number = 100) {
+  return useQuery({
+    queryKey: ['portfolioTrades', portfolioId, limit],
+    queryFn: () => portfolioApi.getTrades(portfolioId, limit),
+    enabled: portfolioId > 0 && isAuthenticated(),
+    staleTime: 30 * 1000,
+  });
+}
+
+export function usePortfolioEquityCurve(portfolioId: number, days: number = 365) {
+  return useQuery({
+    queryKey: ['portfolioEquityCurve', portfolioId, days],
+    queryFn: () => portfolioApi.getEquityCurve(portfolioId, days),
+    enabled: portfolioId > 0 && isAuthenticated(),
+    staleTime: 60 * 1000,
   });
 }
 
@@ -581,6 +621,25 @@ export function usePredictVolatility() {
   return useMutation({
     mutationFn: ({ sector, horizon }: { sector: string; horizon?: number }) =>
       mlApi.predictVolatility(sector, horizon),
+  });
+}
+
+export function useSymbolForecast(symbol: string) {
+  return useQuery({
+    queryKey: ['symbolForecast', symbol],
+    queryFn: () => mlApi.predictSymbol(symbol),
+    enabled: !!symbol && symbol.length > 0,
+    staleTime: 10 * 60 * 1000, // Model forecasts change slowly intraday
+    retry: 1,
+  });
+}
+
+export function useAllForecasts() {
+  return useQuery({
+    queryKey: ['allForecasts'],
+    queryFn: () => mlApi.forecastAll(),
+    staleTime: 10 * 60 * 1000,
+    retry: 1,
   });
 }
 

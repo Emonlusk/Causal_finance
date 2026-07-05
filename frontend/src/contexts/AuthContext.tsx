@@ -59,9 +59,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(response.user);
   };
 
-  const logout = () => {
-    clearTokens();
-    setUser(null);
+  const logout = async () => {
+    try {
+      await authApi.logout();
+    } catch (error) {
+      console.error('Server-side logout failed:', error);
+    } finally {
+      clearTokens();
+      setUser(null);
+    }
   };
 
   const value = {

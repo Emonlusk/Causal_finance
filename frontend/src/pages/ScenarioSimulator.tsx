@@ -193,7 +193,7 @@ const ScenarioSimulator = () => {
           inflation: { change: inflation / 100 },
           gdp_growth: { change: gdp / 100 },
         },
-        portfolio_id: selectedPortfolioId,
+        portfolio_weights: selectedPortfolioId ? undefined : undefined,
         save_results: false,
       });
       setSimulationResults(result?.results || result);
@@ -262,7 +262,6 @@ const ScenarioSimulator = () => {
             inflation: { change: inflation / 100 },
             gdp_growth: { change: gdp / 100 },
           },
-          portfolio_id: selectedPortfolioId,
           save_results: false,
         });
         

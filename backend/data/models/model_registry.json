@@ -17,6 +17,22 @@
           "significance": 0.05
         },
         "registered_at": "2026-02-28T13:50:44.144493",
+        "is_active": false
+      },
+      "causal_discovery_engine_20260706_020545": {
+        "model_name": "discovery_engine",
+        "version": "20260706_020545",
+        "metrics": {
+          "n_relationships": 102,
+          "n_nodes": 11
+        },
+        "hyperparameters": {
+          "max_lag": 5,
+          "significance": 0.05
+        },
+        "filepath": "C:\\Kartik\\Hard_coding\\Causal_finance\\backend\\data\\models\\causal_discovery_20260706_020545.pkl",
+        "training_data_hash": "f09ac7d60032",
+        "created_at": "2026-07-06T02:06:41.583974",
         "is_active": true
       }
     },
@@ -37,6 +53,34 @@
           "method": "auto (DoWhy > DML > OLS)"
         },
         "registered_at": "2026-02-28T13:50:44.144701",
+        "is_active": false
+      },
+      "treatment_effect_estimator_20260706_020545": {
+        "model_name": "effect_estimator",
+        "version": "20260706_020545",
+        "metrics": {
+          "n_effects": 11
+        },
+        "hyperparameters": {
+          "method": "auto"
+        },
+        "filepath": "C:\\Kartik\\Hard_coding\\Causal_finance\\backend\\data\\models\\treatment_effects_20260706_020545.pkl",
+        "training_data_hash": "f09ac7d60032",
+        "created_at": "2026-07-06T02:07:11.466148",
+        "is_active": false
+      },
+      "treatment_effect_estimator_20260706_021047": {
+        "model_name": "effect_estimator",
+        "version": "20260706_021047",
+        "metrics": {
+          "n_effects": 11
+        },
+        "hyperparameters": {
+          "method": "auto"
+        },
+        "filepath": "C:\\Kartik\\Hard_coding\\Causal_finance\\backend\\data\\models\\treatment_effects_20260706_021047.pkl",
+        "training_data_hash": "f09ac7d60032",
+        "created_at": "2026-07-06T02:16:24.361172",
         "is_active": true
       }
     },
@@ -274,6 +318,363 @@
           ]
         },
         "registered_at": "2026-02-28T13:50:44.144805",
+        "is_active": false
+      },
+      "forecast_ensemble_v2_20260705_201438": {
+        "model_name": "ensemble_v2",
+        "version": "20260705_201438",
+        "metrics": {
+          "Technology": {
+            "horizons": {
+              "1": {
+                "gbm_rmse": 0.016721,
+                "arima_rmse": 0.016742,
+                "naive_rmse": 0.016745,
+                "gbm_dir": 0.585317,
+                "clf_dir": 0.585317
+              },
+              "5": {
+                "gbm_rmse": 0.037951,
+                "arima_rmse": 0.035816,
+                "naive_rmse": 0.03619,
+                "gbm_dir": 0.52381,
+                "clf_dir": 0.531746
+              },
+              "21": {
+                "gbm_rmse": 0.073752,
+                "naive_rmse": 0.071182,
+                "gbm_dir": 0.569444,
+                "clf_dir": 0.615079
+              }
+            }
+          }
+        },
+        "hyperparameters": {
+          "models": [
+            "gbm",
+            "arima",
+            "egarch"
+          ],
+          "horizons": [
+            1,
+            5,
+            21
+          ],
+          "validation": "walk_forward_4x126d"
+        },
+        "filepath": "C:\\Kartik\\Hard_coding\\Causal_finance\\backend\\app\\services\\..\\..\\data\\models",
+        "training_data_hash": null,
+        "created_at": "2026-07-06T01:45:22.272283",
+        "is_active": false
+      },
+      "forecast_ensemble_v2_20260705_201720": {
+        "model_name": "ensemble_v2",
+        "version": "20260705_201720",
+        "metrics": {
+          "Technology": {
+            "horizons": {
+              "1": {
+                "gbm_rmse": 0.016721,
+                "arima_rmse": 0.016742,
+                "naive_rmse": 0.016745,
+                "gbm_dir": 0.585317,
+                "clf_dir": 0.585317,
+                "lstm_rmse": 0.026253,
+                "lstm_dir": 0.4423
+              },
+              "5": {
+                "gbm_rmse": 0.037951,
+                "arima_rmse": 0.035816,
+                "naive_rmse": 0.03619,
+                "gbm_dir": 0.52381,
+                "clf_dir": 0.531746
+              },
+              "21": {
+                "gbm_rmse": 0.073752,
+                "naive_rmse": 0.071182,
+                "gbm_dir": 0.569444,
+                "clf_dir": 0.615079
+              }
+            }
+          },
+          "Healthcare": {
+            "horizons": {
+              "1": {
+                "gbm_rmse": 0.009791,
+                "arima_rmse": 0.009887,
+                "naive_rmse": 0.009852,
+                "gbm_dir": 0.5,
+                "clf_dir": 0.529762,
+                "lstm_rmse": 0.014745,
+                "lstm_dir": 0.501
+              },
+              "5": {
+                "gbm_rmse": 0.021762,
+                "arima_rmse": 0.02131,
+                "naive_rmse": 0.021239,
+                "gbm_dir": 0.543651,
+                "clf_dir": 0.529762
+              },
+              "21": {
+                "gbm_rmse": 0.044216,
+                "naive_rmse": 0.037676,
+                "gbm_dir": 0.44246,
+                "clf_dir": 0.505952
+              }
+            }
+          },
+          "Energy": {
+            "horizons": {
+              "1": {
+                "gbm_rmse": 0.014275,
+                "arima_rmse": 0.014324,
+                "naive_rmse": 0.014301,
+                "gbm_dir": 0.551587,
+                "clf_dir": 0.531746,
+                "lstm_rmse": 0.01986,
+                "lstm_dir": 0.5029
+              },
+              "5": {
+                "gbm_rmse": 0.034456,
+                "arima_rmse": 0.03319,
+                "naive_rmse": 0.033239,
+                "gbm_dir": 0.515873,
+                "clf_dir": 0.551587
+              },
+              "21": {
+                "gbm_rmse": 0.05962,
+                "naive_rmse": 0.057204,
+                "gbm_dir": 0.59127,
+                "clf_dir": 0.571429
+              }
+            }
+          },
+          "Financials": {
+            "horizons": {
+              "1": {
+                "gbm_rmse": 0.010974,
+                "arima_rmse": 0.010963,
+                "naive_rmse": 0.010944,
+                "gbm_dir": 0.53373,
+                "clf_dir": 0.561508,
+                "lstm_rmse": 0.016418,
+                "lstm_dir": 0.4384
+              },
+              "5": {
+                "gbm_rmse": 0.025545,
+                "arima_rmse": 0.022748,
+                "naive_rmse": 0.022917,
+                "gbm_dir": 0.517857,
+                "clf_dir": 0.525794
+              },
+              "21": {
+                "gbm_rmse": 0.050507,
+                "naive_rmse": 0.042445,
+                "gbm_dir": 0.498016,
+                "clf_dir": 0.605159
+              }
+            }
+          },
+          "Industrials": {
+            "horizons": {
+              "1": {
+                "gbm_rmse": 0.011225,
+                "arima_rmse": 0.011218,
+                "naive_rmse": 0.011207,
+                "gbm_dir": 0.521825,
+                "clf_dir": 0.525794,
+                "lstm_rmse": 0.017526,
+                "lstm_dir": 0.4599
+              },
+              "5": {
+                "gbm_rmse": 0.026117,
+                "arima_rmse": 0.022656,
+                "naive_rmse": 0.022992,
+                "gbm_dir": 0.490079,
+                "clf_dir": 0.525794
+              },
+              "21": {
+                "gbm_rmse": 0.048515,
+                "naive_rmse": 0.044887,
+                "gbm_dir": 0.609127,
+                "clf_dir": 0.603175
+              }
+            }
+          },
+          "Consumer_Discretionary": {
+            "horizons": {
+              "1": {
+                "gbm_rmse": 0.013839,
+                "arima_rmse": 0.013918,
+                "naive_rmse": 0.013869,
+                "gbm_dir": 0.527778,
+                "clf_dir": 0.535714,
+                "lstm_rmse": 0.019892,
+                "lstm_dir": 0.4638
+              },
+              "5": {
+                "gbm_rmse": 0.031635,
+                "arima_rmse": 0.028726,
+                "naive_rmse": 0.028829,
+                "gbm_dir": 0.472222,
+                "clf_dir": 0.505952
+              },
+              "21": {
+                "gbm_rmse": 0.059112,
+                "naive_rmse": 0.057058,
+                "gbm_dir": 0.553571,
+                "clf_dir": 0.549603
+              }
+            }
+          },
+          "Consumer_Staples": {
+            "horizons": {
+              "1": {
+                "gbm_rmse": 0.008147,
+                "arima_rmse": 0.008231,
+                "naive_rmse": 0.008219,
+                "gbm_dir": 0.53373,
+                "clf_dir": 0.507937,
+                "lstm_rmse": 0.01238,
+                "lstm_dir": 0.4775
+              },
+              "5": {
+                "gbm_rmse": 0.019106,
+                "arima_rmse": 0.0176,
+                "naive_rmse": 0.017539,
+                "gbm_dir": 0.490079,
+                "clf_dir": 0.539683
+              },
+              "21": {
+                "gbm_rmse": 0.037905,
+                "naive_rmse": 0.033351,
+                "gbm_dir": 0.577381,
+                "clf_dir": 0.537698
+              }
+            }
+          },
+          "Utilities": {
+            "horizons": {
+              "1": {
+                "gbm_rmse": 0.010038,
+                "arima_rmse": 0.010064,
+                "naive_rmse": 0.010048,
+                "gbm_dir": 0.55754,
+                "clf_dir": 0.565476,
+                "lstm_rmse": 0.013408,
+                "lstm_dir": 0.5068
+              },
+              "5": {
+                "gbm_rmse": 0.025546,
+                "arima_rmse": 0.020657,
+                "naive_rmse": 0.020847,
+                "gbm_dir": 0.414683,
+                "clf_dir": 0.446429
+              },
+              "21": {
+                "gbm_rmse": 0.051438,
+                "naive_rmse": 0.03966,
+                "gbm_dir": 0.573413,
+                "clf_dir": 0.597222
+              }
+            }
+          },
+          "Materials": {
+            "horizons": {
+              "1": {
+                "gbm_rmse": 0.011447,
+                "arima_rmse": 0.011488,
+                "naive_rmse": 0.011491,
+                "gbm_dir": 0.496032,
+                "clf_dir": 0.507937,
+                "lstm_rmse": 0.023942,
+                "lstm_dir": 0.4912
+              },
+              "5": {
+                "gbm_rmse": 0.026478,
+                "arima_rmse": 0.025435,
+                "naive_rmse": 0.025501,
+                "gbm_dir": 0.509921,
+                "clf_dir": 0.529762
+              },
+              "21": {
+                "gbm_rmse": 0.05297,
+                "naive_rmse": 0.046682,
+                "gbm_dir": 0.426587,
+                "clf_dir": 0.513889
+              }
+            }
+          },
+          "Real_Estate": {
+            "horizons": {
+              "1": {
+                "gbm_rmse": 0.010069,
+                "arima_rmse": 0.010173,
+                "naive_rmse": 0.010082,
+                "gbm_dir": 0.515873,
+                "clf_dir": 0.537698,
+                "lstm_rmse": 0.014013,
+                "lstm_dir": 0.4797
+              },
+              "5": {
+                "gbm_rmse": 0.02325,
+                "arima_rmse": 0.021394,
+                "naive_rmse": 0.021411,
+                "gbm_dir": 0.52381,
+                "clf_dir": 0.490079
+              },
+              "21": {
+                "gbm_rmse": 0.047237,
+                "naive_rmse": 0.037377,
+                "gbm_dir": 0.472222,
+                "clf_dir": 0.470238
+              }
+            }
+          },
+          "Communication_Services": {
+            "horizons": {
+              "1": {
+                "gbm_rmse": 0.010281,
+                "arima_rmse": 0.010345,
+                "naive_rmse": 0.01034,
+                "gbm_dir": 0.525794,
+                "clf_dir": 0.551587,
+                "lstm_rmse": 0.016279,
+                "lstm_dir": 0.4757
+              },
+              "5": {
+                "gbm_rmse": 0.025193,
+                "arima_rmse": 0.022366,
+                "naive_rmse": 0.022494,
+                "gbm_dir": 0.498016,
+                "clf_dir": 0.575397
+              },
+              "21": {
+                "gbm_rmse": 0.044498,
+                "naive_rmse": 0.044458,
+                "gbm_dir": 0.696429,
+                "clf_dir": 0.666667
+              }
+            }
+          }
+        },
+        "hyperparameters": {
+          "models": [
+            "gbm",
+            "arima",
+            "egarch",
+            "lstm"
+          ],
+          "horizons": [
+            1,
+            5,
+            21
+          ],
+          "validation": "walk_forward_4x126d"
+        },
+        "filepath": "C:\\Kartik\\Hard_coding\\Causal_finance\\backend\\app\\services\\..\\..\\data\\models",
+        "training_data_hash": null,
+        "created_at": "2026-07-06T01:56:04.141771",
         "is_active": true
       }
     },
@@ -318,14 +719,48 @@
           "covariance_type": "full"
         },
         "registered_at": "2026-02-28T13:50:44.144900",
+        "is_active": false
+      },
+      "regime_hmm_detector_20260705_202604": {
+        "model_name": "hmm_detector",
+        "version": "20260705_202604",
+        "metrics": {
+          "bear": {
+            "mean_return": -0.06558953309955536,
+            "volatility": 0.2849928881055637,
+            "frequency": 0.17200880841693172,
+            "avg_duration": 50.214285714285715,
+            "sharpe_ratio": -0.20764956877684923
+          },
+          "sideways": {
+            "mean_return": 0.1565604254732093,
+            "volatility": 0.15344974551389373,
+            "frequency": 0.3677514068999266,
+            "avg_duration": 28.358490566037737,
+            "sharpe_ratio": 1.030985329274925
+          },
+          "bull": {
+            "mean_return": 0.21619734437183322,
+            "volatility": 0.08986837116361014,
+            "frequency": 0.4602397846831417,
+            "avg_duration": 48.23076923076923,
+            "sharpe_ratio": 2.3765965038913297
+          }
+        },
+        "hyperparameters": {
+          "n_regimes": 3
+        },
+        "filepath": "C:\\Kartik\\Hard_coding\\Causal_finance\\backend\\data\\models\\regime_detector_20260705_202604.pkl",
+        "training_data_hash": null,
+        "created_at": "2026-07-06T01:56:04.937236",
         "is_active": true
       }
     }
   },
   "active_versions": {
-    "causal": "causal_discovery_engine_20260228_133628",
-    "treatment": "treatment_effect_estimator_20260228_133628",
-    "forecast": "forecast_ensemble_20260228_133628",
-    "regime": "regime_hmm_detector_20260228_133628"
+    "causal": "causal_discovery_engine_20260706_020545",
+    "treatment": "treatment_effect_estimator_20260706_021047",
+    "forecast": "forecast_ensemble_v2_20260705_201720",
+    "regime": "regime_hmm_detector_20260705_202604"
   }
 }

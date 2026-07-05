@@ -3,6 +3,7 @@ from app.models.portfolio import Portfolio
 from app.models.causal_model import CausalModel
 from app.models.scenario import Scenario
 from app.models.activity import Activity
+from app.models.trade import Trade, PortfolioSnapshot
 from app.models.ml_models import (
     TrainedModel, 
     ModelPrediction, 
@@ -12,11 +13,13 @@ from app.models.ml_models import (
 )
 
 __all__ = [
-    'User', 
-    'Portfolio', 
-    'CausalModel', 
-    'Scenario', 
+    'User',
+    'Portfolio',
+    'CausalModel',
+    'Scenario',
     'Activity',
+    'Trade',
+    'PortfolioSnapshot',
     'TrainedModel',
     'ModelPrediction',
     'CausalRelationship',

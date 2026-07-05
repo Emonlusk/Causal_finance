@@ -654,6 +654,210 @@ def discover_sector_macro_relationships(
     return sector_drivers
 
 
+def visualize_causal_dag(
+    edges: List[Dict[str, Any]],
+    output_path: str = 'results/figures/causal_dag.png',
+    title: str = 'Discovered Causal DAG: Macroeconomic Factors → Sector Returns'
+) -> str:
+    """
+    Generate publication-quality causal DAG visualization.
+    
+    Args:
+        edges: List of edge dicts with 'cause', 'effect', 'weight', 'method' keys
+        output_path: Path to save the PNG figure
+        title: Plot title
+        
+    Returns:
+        Path to saved figure
+    """
+    import os
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    
+    try:
+        import networkx as nx
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        
+        G = nx.DiGraph()
+        
+        # Classify nodes
+        macro_nodes = set()
+        sector_nodes = set()
+        
+        for edge in edges:
+            cause = edge.get('cause', edge.get('from', ''))
+            effect = edge.get('effect', edge.get('to', ''))
+            weight = edge.get('weight', edge.get('strength', 1.0))
+            
+            G.add_edge(cause, effect, weight=abs(weight))
+            
+            # Heuristic classification
+            if 'Return' in effect or any(s in effect for s in ['Technology', 'Healthcare', 'Energy', 'Financial']):
+                sector_nodes.add(effect)
+                macro_nodes.add(cause)
+            else:
+                macro_nodes.add(cause)
+                macro_nodes.add(effect)
+        
+        if len(G.nodes()) == 0:
+            logger.warning("No edges to visualize")
+            return ''
+        
+        # Layout
+        if len(macro_nodes) > 0 and len(sector_nodes) > 0:
+            # Bipartite-like layout: macros on left, sectors on right
+            pos = {}
+            macro_list = sorted(macro_nodes)
+            sector_list = sorted(sector_nodes)
+            for i, node in enumerate(macro_list):
+                pos[node] = (-1, -i * 1.5)
+            for i, node in enumerate(sector_list):
+                pos[node] = (1, -i * 1.2)
+            # Any remaining nodes
+            remaining = set(G.nodes()) - macro_nodes - sector_nodes
+            for i, node in enumerate(remaining):
+                pos[node] = (0, -i * 1.5)
+        else:
+            pos = nx.spring_layout(G, k=2, iterations=50, seed=42)
+        
+        fig, ax = plt.subplots(1, 1, figsize=(14, 10))
+        
+        # Draw edges with varying widths based on weight
+        edge_weights = [G[u][v].get('weight', 1) for u, v in G.edges()]
+        max_w = max(edge_weights) if edge_weights else 1
+        edge_widths = [1 + 3 * (w / max_w) for w in edge_weights]
+        
+        # Node colors
+        node_colors = []
+        for node in G.nodes():
+            if node in macro_nodes:
+                node_colors.append('#4A90D9')  # Blue for macro
+            elif node in sector_nodes:
+                node_colors.append('#50C878')  # Green for sectors
+            else:
+                node_colors.append('#FFB347')  # Orange for other
+        
+        nx.draw_networkx_nodes(G, pos, ax=ax, node_color=node_colors, 
+                              node_size=2000, alpha=0.9, edgecolors='black', linewidths=1.5)
+        nx.draw_networkx_labels(G, pos, ax=ax, font_size=7, font_weight='bold')
+        nx.draw_networkx_edges(G, pos, ax=ax, width=edge_widths, alpha=0.6,
+                              edge_color='#333333', arrows=True, arrowsize=20,
+                              connectionstyle='arc3,rad=0.1')
+        
+        ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
+        
+        # Legend
+        from matplotlib.patches import Patch
+        legend_elements = [
+            Patch(facecolor='#4A90D9', edgecolor='black', label='Macro Factors'),
+            Patch(facecolor='#50C878', edgecolor='black', label='Sector Returns'),
+        ]
+        ax.legend(handles=legend_elements, loc='lower right', fontsize=10)
+        
+        ax.axis('off')
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white')
+        plt.close()
+        
+        logger.info(f"DAG visualization saved to {output_path}")
+        return output_path
+        
+    except ImportError as e:
+        logger.error(f"Cannot create DAG visualization (missing dependency): {e}")
+        return ''
+    except Exception as e:
+        logger.error(f"DAG visualization error: {e}")
+        return ''
+
+
+def generate_granger_heatmap(
+    feature_matrix: pd.DataFrame,
+    cause_vars: List[str],
+    effect_vars: List[str],
+    max_lag: int = 10,
+    output_path: str = 'results/figures/granger_heatmap.png'
+) -> str:
+    """
+    Generate Granger causality p-value heatmap.
+    
+    Args:
+        feature_matrix: DataFrame with time series data
+        cause_vars: List of potential cause variable names
+        effect_vars: List of potential effect variable names
+        max_lag: Maximum lag for Granger test
+        output_path: Path to save figure
+        
+    Returns:
+        Path to saved figure
+    """
+    import os
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        
+        engine = CausalDiscoveryEngine()
+        
+        # Build p-value matrix
+        p_matrix = np.ones((len(cause_vars), len(effect_vars)))
+        
+        for i, cause in enumerate(cause_vars):
+            for j, effect in enumerate(effect_vars):
+                if cause not in feature_matrix.columns or effect not in feature_matrix.columns:
+                    continue
+                result = engine.granger_causality_test(
+                    feature_matrix, cause_col=cause, effect_col=effect, max_lag=max_lag
+                )
+                if 'p_value' in result and result['p_value'] is not None:
+                    p_matrix[i, j] = result['p_value']
+        
+        fig, ax = plt.subplots(figsize=(14, 8))
+        
+        # Heatmap: -log10(p) so significant values are brighter
+        log_p = -np.log10(p_matrix + 1e-10)
+        
+        im = ax.imshow(log_p, cmap='YlOrRd', aspect='auto', interpolation='nearest')
+        
+        ax.set_xticks(range(len(effect_vars)))
+        ax.set_xticklabels([v.replace('_Return_1d', '').replace('_', ' ') for v in effect_vars],
+                          rotation=45, ha='right', fontsize=8)
+        ax.set_yticks(range(len(cause_vars)))
+        ax.set_yticklabels([v.replace('_Change', '').replace('_', ' ') for v in cause_vars], fontsize=8)
+        
+        # Add significance markers
+        for i in range(len(cause_vars)):
+            for j in range(len(effect_vars)):
+                p_val = p_matrix[i, j]
+                marker = ''
+                if p_val < 0.01:
+                    marker = '***'
+                elif p_val < 0.05:
+                    marker = '**'
+                elif p_val < 0.10:
+                    marker = '*'
+                ax.text(j, i, f'{p_val:.3f}\n{marker}', ha='center', va='center', fontsize=6,
+                       color='white' if log_p[i, j] > 1.5 else 'black')
+        
+        plt.colorbar(im, ax=ax, label='-log10(p-value)')
+        ax.set_title('Granger Causality p-values: Macro Factors → Sector Returns', fontsize=12, fontweight='bold')
+        ax.set_xlabel('Sector Returns')
+        ax.set_ylabel('Macro Factors')
+        
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white')
+        plt.close()
+        
+        logger.info(f"Granger heatmap saved to {output_path}")
+        return output_path
+        
+    except Exception as e:
+        logger.error(f"Granger heatmap error: {e}")
+        return ''
+
+
 # Singleton instance
 _engine = None
 

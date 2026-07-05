@@ -1,14 +1,26 @@
 """
 Portfolio Service
-Handles portfolio optimization, backtesting, and performance calculations
+Handles portfolio optimization, backtesting, and performance calculations.
+
+Implements:
+- Markowitz mean-variance optimization with sector weight caps
+- Causal-adjusted portfolio construction
+- Full backtest engine with comprehensive metrics
+- All paper-required performance measures (Sharpe, Sortino, Calmar, VaR, CVaR, etc.)
 """
 
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 import logging
 import numpy as np
+import pandas as pd
 from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
+
+# Research paper configuration defaults (overridden by Config when available)
+RISK_FREE_RATE = 0.04
+MAX_SECTOR_WEIGHT = 0.20
+TRANSACTION_COST_BPS = 10
 
 # Sector ETF mapping
 SECTOR_ETFS = {
@@ -31,34 +43,32 @@ def calculate_portfolio_performance(portfolio, period: str = '1Y') -> Dict[str, 
     Calculate historical performance for a portfolio
     """
     try:
-        import yfinance as yf
         import pandas as pd
-        
+        from app.services.price_store import get_price_store
+
         weights = portfolio.weights
         if not weights:
             return _get_empty_performance()
-        
+
         # Map period to date range
         period_days = {'1M': 30, '3M': 90, '1Y': 365, 'ALL': 1825}
         days = period_days.get(period, 365)
         end_date = datetime.now()
         start_date = end_date - timedelta(days=days)
-        
+
         # Fetch historical data for all assets
         symbols = list(weights.keys())
-        
+
         try:
-            data = yf.download(symbols, start=start_date, end=end_date, progress=False)
-            
-            if data.empty:
-                return _get_simulated_performance(weights, period)
-            
-            # Get adjusted close prices
-            if len(symbols) == 1:
-                prices = data['Adj Close'].to_frame(symbols[0])
-            else:
-                prices = data['Adj Close']
-            
+            prices = get_price_store().get_history(
+                symbols,
+                start=start_date.strftime('%Y-%m-%d'),
+                end=end_date.strftime('%Y-%m-%d'),
+            )
+            if prices.empty:
+                return {**_get_empty_performance(),
+                        'error': 'Market data unavailable for portfolio assets'}
+
             # Calculate returns
             returns = prices.pct_change().dropna()
             
@@ -99,10 +109,11 @@ def calculate_portfolio_performance(portfolio, period: str = '1Y') -> Dict[str, 
             
         except Exception as e:
             logger.warning(f"Failed to fetch historical data: {e}")
-            return _get_simulated_performance(weights, period)
-            
+            return {**_get_empty_performance(),
+                    'error': f'Market data unavailable: {e}'}
+
     except ImportError:
-        return _get_simulated_performance(portfolio.weights, period)
+        return {**_get_empty_performance(), 'error': 'Data dependencies unavailable'}
 
 
 def _get_empty_performance() -> Dict[str, Any]:
@@ -115,41 +126,6 @@ def _get_empty_performance() -> Dict[str, Any]:
         'time_series': [],
         'start_date': None,
         'end_date': None
-    }
-
-
-def _get_simulated_performance(weights: Dict[str, float], period: str) -> Dict[str, Any]:
-    """Generate simulated performance data when real data unavailable"""
-    np.random.seed(42)
-    
-    period_days = {'1M': 30, '3M': 90, '1Y': 365, 'ALL': 1825}
-    days = period_days.get(period, 365)
-    
-    # Generate random returns based on typical market behavior
-    daily_return = 0.0004  # ~10% annual
-    daily_vol = 0.01  # ~16% annual vol
-    
-    returns = np.random.normal(daily_return, daily_vol, days)
-    cumulative = np.cumprod(1 + returns) - 1
-    
-    # Generate dates
-    end_date = datetime.now()
-    dates = [(end_date - timedelta(days=days-i)).strftime('%Y-%m-%d') for i in range(days)]
-    
-    time_series = [
-        {'date': dates[i], 'return': round(float(cumulative[i]) * 100, 2)}
-        for i in range(0, len(dates), max(1, len(dates) // 50))  # Sample ~50 points
-    ]
-    
-    return {
-        'total_return': round(float(cumulative[-1]) * 100, 2),
-        'volatility': round(float(np.std(returns) * np.sqrt(252) * 100), 2),
-        'sharpe_ratio': round(float(cumulative[-1]) / (np.std(returns) * np.sqrt(252)) if np.std(returns) > 0 else 0, 2),
-        'max_drawdown': round(float(np.min(cumulative) * 100), 2),
-        'time_series': time_series,
-        'start_date': dates[0],
-        'end_date': dates[-1],
-        'note': 'Simulated data - real market data unavailable'
     }
 
 
@@ -170,7 +146,9 @@ def optimize_portfolio_weights(
         
         if returns_data is None:
             return _get_default_optimization(assets, objective, use_causal)
-        
+
+        # Some assets may have been dropped for lack of data
+        assets = returns_data['assets']
         mean_returns = returns_data['mean_returns']
         cov_matrix = returns_data['cov_matrix']
         
@@ -212,29 +190,29 @@ def optimize_portfolio_weights(
 
 
 def _get_asset_returns(assets: List[str], period: str = '1y') -> Optional[Dict]:
-    """Fetch and calculate asset returns"""
+    """Fetch and calculate asset returns from the local price store."""
     try:
-        import yfinance as yf
-        import pandas as pd
-        
-        data = yf.download(assets, period=period, progress=False)
-        
-        if data.empty:
+        from app.services.price_store import get_price_store
+
+        period_days = {'6mo': 182, '1y': 365, '2y': 730, '5y': 1825}
+        days = period_days.get(period, 365)
+        start = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+
+        prices = get_price_store().get_history(assets, start=start)
+        if prices.empty:
             return None
-        
-        if len(assets) == 1:
-            prices = data['Adj Close'].to_frame(assets[0])
-        else:
-            prices = data['Adj Close']
-        
-        returns = prices.pct_change().dropna()
-        
+        # Preserve requested asset order; drop assets with no data
+        cols = [a for a in assets if a in prices.columns]
+        returns = prices[cols].pct_change().dropna()
+        if returns.empty:
+            return None
+
         return {
             'mean_returns': returns.mean().values * 252,  # Annualized
             'cov_matrix': returns.cov().values * 252,  # Annualized
-            'assets': assets
+            'assets': cols
         }
-        
+
     except Exception as e:
         logger.warning(f"Failed to get asset returns: {e}")
         return None
@@ -259,7 +237,7 @@ def _optimize_markowitz(
         def portfolio_return(weights):
             return np.dot(weights, mean_returns)
         
-        def neg_sharpe(weights, risk_free_rate=0.04):
+        def neg_sharpe(weights, risk_free_rate=RISK_FREE_RATE):
             ret = portfolio_return(weights)
             vol = portfolio_volatility(weights)
             return -(ret - risk_free_rate) / vol if vol > 0 else 0
@@ -269,8 +247,8 @@ def _optimize_markowitz(
             {'type': 'eq', 'fun': lambda x: np.sum(x) - 1}  # Weights sum to 1
         ]
         
-        # Bounds (0 to 1 for each asset - long only)
-        bounds = tuple((0, 1) for _ in range(n_assets))
+        # Bounds: long-only with per-asset cap (default 20%)
+        bounds = tuple((0, MAX_SECTOR_WEIGHT) for _ in range(n_assets))
         
         # Initial guess (equal weights)
         init_weights = np.array([1/n_assets] * n_assets)
@@ -381,31 +359,188 @@ def _calculate_metrics(
     weights: np.ndarray,
     mean_returns: np.ndarray,
     cov_matrix: np.ndarray,
-    risk_free_rate: float = 0.04
+    risk_free_rate: float = RISK_FREE_RATE
 ) -> Dict[str, float]:
-    """Calculate portfolio metrics with parametric max drawdown estimate."""
+    """
+    Calculate portfolio metrics from weights, expected returns, and covariance matrix.
+    
+    Computes parametric estimates when only summary statistics are available.
+    For historical-data-based metrics (Sortino, VaR, CVaR, etc.), 
+    see compute_full_metrics() which uses actual return series.
+    """
     portfolio_return = float(np.dot(weights, mean_returns))
     portfolio_vol = float(np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights))))
-    sharpe = (portfolio_return - risk_free_rate) / portfolio_vol if portfolio_vol > 0 else 0
+    excess = portfolio_return - risk_free_rate
+    sharpe = excess / portfolio_vol if portfolio_vol > 0 else 0
+    
+    # Parametric Sortino approximation (assumes normal distribution)
+    daily_vol = portfolio_vol / np.sqrt(252)
+    daily_rf = risk_free_rate / 252
+    daily_mean = portfolio_return / 252
+    # Downside deviation for normal distribution
+    downside_vol_daily = daily_vol * np.sqrt(0.5)  # E[min(r - rf, 0)^2] for symmetric
+    downside_vol = downside_vol_daily * np.sqrt(252)
+    sortino = excess / downside_vol if downside_vol > 0 else 0
     
     # Parametric expected max drawdown (Magdon-Ismail et al., 2004)
-    # E[MDD] ≈ σ × √(π/2) for a driftless random walk over 1 year
-    # Adjusted downward for positive excess return (drift reduces drawdowns)
     if portfolio_vol > 0:
-        base_mdd = portfolio_vol * np.sqrt(np.pi / 2)  # ≈ 1.253 × σ
-        excess_return = max(0, portfolio_return - risk_free_rate)
-        drift_reduction = excess_return * 0.5  # Positive drift cushions drawdowns
-        expected_mdd = max(base_mdd - drift_reduction, portfolio_vol * 0.5)  # Floor at 0.5σ
+        base_mdd = portfolio_vol * np.sqrt(np.pi / 2)
+        excess_return_adj = max(0, excess)
+        drift_reduction = excess_return_adj * 0.5
+        expected_mdd = max(base_mdd - drift_reduction, portfolio_vol * 0.5)
         max_drawdown = round(-expected_mdd * 100, 2)
     else:
         max_drawdown = 0.0
     
+    # Calmar ratio
+    calmar = excess / abs(max_drawdown / 100) if max_drawdown < 0 else 0
+    
+    # Parametric VaR (95%) - daily
+    var_95_daily = -(daily_mean - 1.645 * daily_vol)
+    # Parametric CVaR (95%) - daily using normal distribution
+    cvar_95_daily = -(daily_mean - daily_vol * (stats_norm_pdf(1.645) / 0.05))
+    
     return {
         'expected_return': round(portfolio_return * 100, 2),
         'volatility': round(portfolio_vol * 100, 2),
-        'sharpe_ratio': round(sharpe, 2),
-        'max_drawdown': max_drawdown
+        'sharpe_ratio': round(sharpe, 4),
+        'sortino_ratio': round(sortino, 4),
+        'max_drawdown': max_drawdown,
+        'calmar_ratio': round(calmar, 4),
+        'var_95_daily': round(var_95_daily * 100, 4),
+        'cvar_95_daily': round(cvar_95_daily * 100, 4),
     }
+
+
+def stats_norm_pdf(x: float) -> float:
+    """Standard normal PDF at x (avoids importing scipy for simple case)."""
+    return (1.0 / np.sqrt(2 * np.pi)) * np.exp(-0.5 * x * x)
+
+
+def compute_full_metrics(
+    portfolio_returns: np.ndarray,
+    benchmark_returns: Optional[np.ndarray] = None,
+    risk_free_rate: float = RISK_FREE_RATE,
+    weights_history: Optional[List[Dict[str, float]]] = None
+) -> Dict[str, float]:
+    """
+    Compute all paper-required portfolio metrics from actual return series.
+    
+    Args:
+        portfolio_returns: Array of daily portfolio returns
+        benchmark_returns: Array of daily benchmark returns (for Information Ratio, Treynor)
+        risk_free_rate: Annual risk-free rate
+        weights_history: List of weight dicts over time (for Turnover calculation)
+    
+    Returns:
+        Dictionary with all comprehensive metrics
+    """
+    returns = np.asarray(portfolio_returns)
+    n_days = len(returns)
+    rf_daily = risk_free_rate / 252
+    
+    # Annualized return
+    cumulative = np.prod(1 + returns)
+    ann_return = cumulative ** (252 / n_days) - 1 if n_days > 0 else 0
+    
+    # Annualized volatility
+    ann_vol = np.std(returns, ddof=1) * np.sqrt(252) if n_days > 1 else 0
+    
+    # Excess return
+    excess = ann_return - risk_free_rate
+    
+    # Sharpe Ratio
+    sharpe = excess / ann_vol if ann_vol > 0 else 0
+    
+    # Sortino Ratio
+    downside_returns = returns[returns < rf_daily] - rf_daily
+    if len(downside_returns) > 0:
+        downside_vol = np.sqrt(np.mean(downside_returns ** 2)) * np.sqrt(252)
+    else:
+        downside_vol = 0.0
+    sortino = excess / downside_vol if downside_vol > 0 else 0
+    
+    # Max Drawdown (actual, not parametric)
+    cumulative_curve = np.cumprod(1 + returns)
+    rolling_max = np.maximum.accumulate(cumulative_curve)
+    drawdowns = cumulative_curve / rolling_max - 1
+    max_dd = float(np.min(drawdowns))
+    
+    # Calmar Ratio
+    calmar = ann_return / abs(max_dd) if max_dd < 0 else 0
+    
+    # VaR (95%) - Historical
+    var_95 = float(np.percentile(returns, 5))
+    
+    # CVaR (95%) - Expected Shortfall
+    cvar_95 = float(np.mean(returns[returns <= var_95])) if np.any(returns <= var_95) else var_95
+    
+    # Hit Rate (% positive days)
+    hit_rate_daily = float(np.mean(returns > 0))
+    
+    # Monthly hit rate
+    if n_days >= 21:
+        # Approximate monthly returns by grouping every 21 days
+        n_months = n_days // 21
+        monthly_returns = np.array([
+            np.prod(1 + returns[i*21:(i+1)*21]) - 1
+            for i in range(n_months)
+        ])
+        hit_rate_monthly = float(np.mean(monthly_returns > 0)) if len(monthly_returns) > 0 else 0
+    else:
+        monthly_returns = returns
+        hit_rate_monthly = hit_rate_daily
+    
+    # Turnover (average monthly weight change)
+    turnover = 0.0
+    if weights_history and len(weights_history) > 1:
+        turnovers = []
+        for t in range(1, len(weights_history)):
+            all_assets = set(weights_history[t].keys()) | set(weights_history[t-1].keys())
+            turn = sum(abs(weights_history[t].get(a, 0) - weights_history[t-1].get(a, 0))
+                      for a in all_assets) / 2  # Half-turn
+            turnovers.append(turn)
+        turnover = float(np.mean(turnovers))
+    
+    result = {
+        'annualized_return': round(ann_return * 100, 4),
+        'annualized_volatility': round(ann_vol * 100, 4),
+        'sharpe_ratio': round(sharpe, 4),
+        'sortino_ratio': round(sortino, 4),
+        'max_drawdown': round(max_dd * 100, 4),
+        'calmar_ratio': round(calmar, 4),
+        'var_95_daily': round(var_95 * 100, 4),
+        'cvar_95_daily': round(cvar_95 * 100, 4),
+        'hit_rate_daily': round(hit_rate_daily * 100, 2),
+        'hit_rate_monthly': round(hit_rate_monthly * 100, 2),
+        'turnover_monthly': round(turnover * 100, 4),
+        'total_return': round((cumulative - 1) * 100, 4),
+    }
+    
+    # Information Ratio and Treynor (require benchmark)
+    if benchmark_returns is not None:
+        bench = np.asarray(benchmark_returns)
+        min_len = min(len(returns), len(bench))
+        r, b = returns[:min_len], bench[:min_len]
+        
+        # Information Ratio = (annualized excess return vs benchmark) / tracking error
+        excess_vs_bench = r - b
+        tracking_error = np.std(excess_vs_bench, ddof=1) * np.sqrt(252)
+        ann_excess_vs_bench = np.mean(excess_vs_bench) * 252
+        info_ratio = ann_excess_vs_bench / tracking_error if tracking_error > 0 else 0
+        result['information_ratio'] = round(info_ratio, 4)
+        
+        # Treynor Ratio = excess return / beta
+        if np.var(b) > 0:
+            beta = np.cov(r, b)[0, 1] / np.var(b)
+            treynor = excess / beta if beta != 0 else 0
+            result['treynor_ratio'] = round(treynor, 4)
+            result['beta'] = round(float(beta), 4)
+        else:
+            result['treynor_ratio'] = 0.0
+            result['beta'] = 0.0
+    
+    return result
 
 
 def _get_default_optimization(
@@ -413,148 +548,312 @@ def _get_default_optimization(
     objective: str,
     use_causal: bool
 ) -> Dict[str, Any]:
-    """Return default optimization when real data unavailable"""
+    """Return default optimization when real data unavailable.
+    
+    NOTE: This fallback should NEVER be used for paper results.
+    It returns equal weights with zero-valued metrics to clearly 
+    indicate that real data was not available.
+    """
     n = len(assets)
     equal_weights = {asset: round(1/n, 4) for asset in assets}
     
-    # Slightly different weights for causal
-    causal_weights = equal_weights.copy()
-    if use_causal and 'XLK' in assets:
-        # Reduce tech, increase energy for demonstration
-        causal_weights['XLK'] = round(causal_weights.get('XLK', 0.1) * 0.8, 4)
-        if 'XLE' in assets:
-            causal_weights['XLE'] = round(causal_weights.get('XLE', 0.1) * 1.3, 4)
-        # Normalize
-        total = sum(causal_weights.values())
-        causal_weights = {k: round(v/total, 4) for k, v in causal_weights.items()}
+    empty_metrics = {
+        'expected_return': 0.0,
+        'volatility': 0.0,
+        'sharpe_ratio': 0.0,
+        'sortino_ratio': 0.0,
+        'max_drawdown': 0.0,
+        'calmar_ratio': 0.0,
+        'var_95_daily': 0.0,
+        'cvar_95_daily': 0.0,
+    }
     
     return {
         'traditional': {
             'weights': equal_weights,
-            'metrics': {
-                'expected_return': 10.5,
-                'volatility': 15.2,
-                'sharpe_ratio': 0.69,
-                'max_drawdown': -12.3
-            }
+            'metrics': empty_metrics
         },
         'causal': {
-            'weights': causal_weights,
-            'metrics': {
-                'expected_return': 11.2,
-                'volatility': 14.1,
-                'sharpe_ratio': 0.79,
-                'max_drawdown': -10.8
-            },
-            'adjustments': [
-                {'asset': 'XLK', 'reason': 'Reduced due to rate sensitivity'},
-                {'asset': 'XLE', 'reason': 'Increased due to inflation hedge'}
-            ]
+            'weights': equal_weights,
+            'metrics': empty_metrics,
+            'adjustments': []
         },
         'improvement': {
-            'return': 0.7,
-            'volatility': 1.1,
-            'sharpe': 0.1
+            'return': 0.0,
+            'volatility': 0.0,
+            'sharpe': 0.0
         },
-        'note': 'Default optimization - real market data unavailable'
+        'warning': 'FALLBACK: Real market data unavailable. These are placeholder results.'
     }
 
 
 def run_backtest(
     weights: Dict[str, float],
     start_date: Optional[str] = None,
-    end_date: Optional[str] = None
+    end_date: Optional[str] = None,
+    benchmark_ticker: str = 'SPY',
+    transaction_cost_bps: float = TRANSACTION_COST_BPS
 ) -> Dict[str, Any]:
     """
-    Run historical backtest on portfolio weights
+    Run historical backtest on portfolio weights with comprehensive metrics.
+    
+    Args:
+        weights: Dict mapping ticker symbols to portfolio weights
+        start_date: Backtest start date (YYYY-MM-DD)
+        end_date: Backtest end date (YYYY-MM-DD)
+        benchmark_ticker: Benchmark ticker for relative metrics
+        transaction_cost_bps: Transaction costs in basis points
+        
+    Returns:
+        Dictionary with all performance metrics, time series, and diagnostics
     """
     try:
-        import yfinance as yf
-        import pandas as pd
-        
+        from app.services.price_store import get_price_store
+
         if not weights:
             return {'error': 'No weights provided'}
-        
+
         # Default dates
         if not end_date:
             end_date = datetime.now().strftime('%Y-%m-%d')
         if not start_date:
             start_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
-        
+
         symbols = list(weights.keys())
+        all_tickers = symbols.copy()
+        if benchmark_ticker not in all_tickers:
+            all_tickers.append(benchmark_ticker)
+
+        prices = get_price_store().get_history(all_tickers, start=start_date, end=end_date)
+
+        if prices.empty:
+            return {'error': 'Market data unavailable for backtest',
+                    'start_date': start_date, 'end_date': end_date}
         
-        data = yf.download(symbols, start=start_date, end=end_date, progress=False)
+        # Separate benchmark
+        benchmark_returns = None
+        if benchmark_ticker in prices.columns:
+            benchmark_returns = prices[benchmark_ticker].pct_change().dropna().values
         
-        if data.empty:
-            return _get_simulated_backtest(weights, start_date, end_date)
+        # Portfolio returns
+        portfolio_prices = prices[[s for s in symbols if s in prices.columns]]
+        returns = portfolio_prices.pct_change().dropna()
         
-        if len(symbols) == 1:
-            prices = data['Adj Close'].to_frame(symbols[0])
-        else:
-            prices = data['Adj Close']
-        
-        returns = prices.pct_change().dropna()
-        
-        # Calculate portfolio returns
         weight_array = np.array([weights.get(s, 0) for s in returns.columns])
-        portfolio_returns = returns.dot(weight_array)
+        # Normalize weights if they don't sum to 1
+        if np.sum(weight_array) > 0:
+            weight_array = weight_array / np.sum(weight_array)
         
-        # Cumulative returns
-        cumulative = (1 + portfolio_returns).cumprod()
+        portfolio_returns_series = returns.dot(weight_array)
         
-        # Metrics
-        total_return = float(cumulative.iloc[-1] - 1) * 100
-        ann_return = float((cumulative.iloc[-1] ** (252/len(returns)) - 1) * 100)
-        volatility = float(portfolio_returns.std() * np.sqrt(252) * 100)
-        sharpe = ann_return / volatility if volatility > 0 else 0
+        # Apply transaction costs (initial buy)
+        if transaction_cost_bps > 0:
+            initial_cost = transaction_cost_bps / 10000.0
+            portfolio_returns_series.iloc[0] -= initial_cost
         
-        # Max drawdown
-        rolling_max = cumulative.expanding().max()
-        drawdown = (cumulative / rolling_max - 1)
-        max_drawdown = float(drawdown.min() * 100)
+        # Align benchmark to same dates
+        if benchmark_returns is not None:
+            bench_aligned = prices[benchmark_ticker].pct_change().dropna()
+            common_idx = portfolio_returns_series.index.intersection(bench_aligned.index)
+            portfolio_returns_series = portfolio_returns_series.loc[common_idx]
+            benchmark_returns = bench_aligned.loc[common_idx].values
         
-        # Time series
+        portfolio_returns_arr = portfolio_returns_series.values
+        
+        # Compute full metrics
+        metrics = compute_full_metrics(
+            portfolio_returns_arr,
+            benchmark_returns=benchmark_returns,
+            risk_free_rate=RISK_FREE_RATE
+        )
+        
+        # Cumulative returns for time series
+        cumulative = np.cumprod(1 + portfolio_returns_arr)
+        
+        # Build time series
+        dates = portfolio_returns_series.index
         time_series = [
             {'date': date.strftime('%Y-%m-%d'), 'value': round(float(val), 4)}
-            for date, val in cumulative.items()
+            for date, val in zip(dates, cumulative)
         ]
+        
+        # Drawdown time series
+        rolling_max = np.maximum.accumulate(cumulative)
+        drawdown_series = cumulative / rolling_max - 1
+        drawdown_ts = [
+            {'date': date.strftime('%Y-%m-%d'), 'drawdown': round(float(dd) * 100, 4)}
+            for date, dd in zip(dates, drawdown_series)
+        ]
+        
+        # Benchmark cumulative for comparison
+        benchmark_ts = []
+        if benchmark_returns is not None:
+            bench_cumulative = np.cumprod(1 + benchmark_returns)
+            benchmark_ts = [
+                {'date': date.strftime('%Y-%m-%d'), 'value': round(float(val), 4)}
+                for date, val in zip(dates, bench_cumulative)
+            ]
         
         return {
             'start_date': start_date,
             'end_date': end_date,
-            'total_return': round(total_return, 2),
-            'annualized_return': round(ann_return, 2),
-            'volatility': round(volatility, 2),
-            'sharpe_ratio': round(sharpe, 2),
-            'max_drawdown': round(max_drawdown, 2),
-            'time_series': time_series[::max(1, len(time_series)//100)]  # Sample 100 points
+            'weights': weights,
+            **metrics,
+            'time_series': time_series[::max(1, len(time_series)//100)],
+            'drawdown_series': drawdown_ts[::max(1, len(drawdown_ts)//100)],
+            'benchmark_series': benchmark_ts[::max(1, len(benchmark_ts)//100)],
+            'benchmark_ticker': benchmark_ticker,
+            'transaction_cost_bps': transaction_cost_bps,
+            'n_trading_days': len(portfolio_returns_arr),
+            'daily_returns': portfolio_returns_arr.tolist(),  # For downstream statistical tests
         }
         
     except Exception as e:
         logger.error(f"Backtest error: {e}")
-        return _get_simulated_backtest(weights, start_date, end_date)
+        return {'error': f'Backtest failed: {e}',
+                'start_date': start_date, 'end_date': end_date}
 
 
-def _get_simulated_backtest(
-    weights: Dict[str, float],
-    start_date: str,
-    end_date: str
+def apply_transaction_costs(
+    returns_series: np.ndarray,
+    weights_history: List[Dict[str, float]],
+    cost_bps: float
+) -> np.ndarray:
+    """
+    Apply round-trip transaction costs in basis points.
+    
+    Args:
+        returns_series: Array of daily portfolio returns
+        weights_history: List of weight dicts at each rebalance point
+        cost_bps: Transaction cost in basis points (e.g., 10 = 10bps)
+    
+    Returns:
+        Adjusted return series with costs subtracted
+    """
+    adjusted = returns_series.copy()
+    cost_per_trade = cost_bps / 10000.0
+    
+    if len(weights_history) > 1:
+        for t in range(1, len(weights_history)):
+            all_assets = set(weights_history[t].keys()) | set(weights_history[t-1].keys())
+            turnover = sum(abs(weights_history[t].get(s, 0) - weights_history[t-1].get(s, 0))
+                          for s in all_assets)
+            cost = 0.5 * turnover * cost_per_trade  # Half-turn cost
+            # Map rebalance to return index (assuming monthly rebalancing = 21 trading days)
+            idx = min(t * 21, len(adjusted) - 1)
+            adjusted[idx] -= cost
+    
+    return adjusted
+
+
+def run_walk_forward_backtest(
+    assets: List[str],
+    train_window: int = 252 * 3,
+    test_window: int = 63,
+    n_folds: int = 4,
+    use_causal: bool = True,
+    start_date: str = '2018-01-01',
+    end_date: str = '2024-01-01'
 ) -> Dict[str, Any]:
-    """Generate simulated backtest results"""
-    np.random.seed(42)
+    """
+    Run walk-forward (rolling window) cross-validation backtest.
     
-    days = 252
-    returns = np.random.normal(0.0004, 0.01, days)
-    cumulative = np.cumprod(1 + returns)
+    Each fold:
+    1. Train on train_window days
+    2. Optimize weights
+    3. Test on test_window days
+    4. Roll forward
     
-    return {
-        'start_date': start_date,
-        'end_date': end_date,
-        'total_return': round(float(cumulative[-1] - 1) * 100, 2),
-        'annualized_return': round(float((cumulative[-1] ** (252 / days) - 1) * 100), 2),
-        'volatility': round(float(np.std(returns) * np.sqrt(252) * 100), 2),
-        'sharpe_ratio': round(float((cumulative[-1] ** (252 / days) - 1)) / float(np.std(returns) * np.sqrt(252)) if np.std(returns) > 0 else 0, 2),
-        'max_drawdown': round(float(np.min(cumulative / np.maximum.accumulate(cumulative) - 1) * 100), 2),
-        'time_series': [],
-        'note': 'Simulated backtest - real market data unavailable'
-    }
+    Args:
+        assets: List of ticker symbols
+        train_window: Training window size in trading days
+        test_window: Testing window size in trading days
+        n_folds: Number of rolling folds
+        use_causal: Whether to use causal optimization
+        start_date: Overall start date
+        end_date: Overall end date
+    
+    Returns:
+        Dictionary with per-fold and aggregate results
+    """
+    try:
+        from app.services.price_store import get_price_store
+
+        prices = get_price_store().get_history(
+            assets + ['SPY'], start=start_date, end=end_date)
+        if prices.empty:
+            return {'error': 'Could not fetch data for walk-forward backtest'}
+        
+        returns = prices.pct_change().dropna()
+        n_total = len(returns)
+        
+        fold_results = []
+        all_oos_returns = []
+        
+        for fold in range(n_folds):
+            train_start = fold * test_window
+            train_end = train_start + train_window
+            test_end = train_end + test_window
+            
+            if test_end > n_total:
+                break
+            
+            # Training data
+            train_returns = returns.iloc[train_start:train_end]
+            test_returns = returns.iloc[train_end:test_end]
+            
+            # Compute mean returns and covariance from training data
+            mean_ret = train_returns.mean().values * 252
+            cov_mat = train_returns.cov().values * 252
+            
+            # Optimize on training data
+            weights_arr = _optimize_markowitz(mean_ret, cov_mat, 'max_sharpe')
+            
+            if use_causal:
+                try:
+                    weights_arr, _ = _optimize_with_causal(
+                        mean_ret, cov_mat, 'max_sharpe', 
+                        list(train_returns.columns), None
+                    )
+                except Exception:
+                    pass  # Fall back to Markowitz weights
+            
+            # Test on out-of-sample data
+            portfolio_cols = [c for c in test_returns.columns if c in assets]
+            test_asset_returns = test_returns[portfolio_cols]
+            weight_vec = np.array([weights_arr[list(returns.columns).index(c)] 
+                                   for c in portfolio_cols if c in returns.columns])
+            if np.sum(weight_vec) > 0:
+                weight_vec = weight_vec / np.sum(weight_vec)
+            
+            oos_returns = test_asset_returns.dot(weight_vec).values
+            all_oos_returns.extend(oos_returns)
+            
+            # Per-fold metrics
+            fold_metrics = compute_full_metrics(oos_returns, risk_free_rate=RISK_FREE_RATE)
+            fold_metrics['fold'] = fold + 1
+            fold_metrics['train_start'] = returns.index[train_start].strftime('%Y-%m-%d')
+            fold_metrics['train_end'] = returns.index[train_end - 1].strftime('%Y-%m-%d')
+            fold_metrics['test_start'] = returns.index[train_end].strftime('%Y-%m-%d')
+            fold_metrics['test_end'] = returns.index[min(test_end - 1, n_total - 1)].strftime('%Y-%m-%d')
+            fold_results.append(fold_metrics)
+        
+        # Aggregate out-of-sample metrics
+        if all_oos_returns:
+            aggregate_metrics = compute_full_metrics(
+                np.array(all_oos_returns), risk_free_rate=RISK_FREE_RATE
+            )
+        else:
+            aggregate_metrics = {}
+        
+        return {
+            'n_folds': len(fold_results),
+            'train_window_days': train_window,
+            'test_window_days': test_window,
+            'fold_results': fold_results,
+            'aggregate': aggregate_metrics
+        }
+        
+    except Exception as e:
+        logger.error(f"Walk-forward backtest error: {e}")
+        return {'error': str(e)}

@@ -71,6 +71,9 @@ import {
 } from "@/lib/hooks";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
+import { EquityCurveCard } from "@/components/trading/EquityCurveCard";
+import { TradeHistoryCard } from "@/components/trading/TradeHistoryCard";
+import { SymbolForecastCard } from "@/components/trading/SymbolForecastCard";
 
 // Stock to sector mapping for predictions
 const STOCK_SECTOR_MAP: Record<string, string> = {
@@ -812,6 +815,10 @@ const PaperTrading = () => {
                               )}
                             </div>
                           )}
+
+                          {tradeSymbol.length >= 1 && (
+                            <SymbolForecastCard symbol={tradeSymbol} />
+                          )}
                           
                           <p className="text-xs text-muted-foreground">
                             Portfolio cash: ${portfolioCash.toLocaleString("en-US", { minimumFractionDigits: 2 })}
@@ -1032,6 +1039,14 @@ const PaperTrading = () => {
             </CardContent>
           </Card>
         </div>
+
+        {/* Performance: equity curve + order history */}
+        {selectedPortfolio && (
+          <div className="grid gap-6 lg:grid-cols-2">
+            <EquityCurveCard portfolioId={selectedPortfolio} />
+            <TradeHistoryCard portfolioId={selectedPortfolio} />
+          </div>
+        )}
 
         {/* ML Predictions & Causal Insights Section */}
         <div className="grid gap-6 lg:grid-cols-2">
