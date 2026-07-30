@@ -141,8 +141,13 @@ def run_causal_evaluation(
                     row[f'refutation_{test_name}_p'] = ref_p
                     row[f'refutation_{test_name}_passed'] = passed
                     
-                    status = 'PASS' if passed else 'FAIL'
-                    print(f"  Refutation [{test_name}]: p={ref_p:.4f if ref_p else 'N/A'}, {status}")
+                    # passed can genuinely be None (undetermined, e.g. when
+                    # the refuter returned no new_effect) since the pass/fail
+                    # logic in treatment_effects.py was fixed to distinguish
+                    # that from an actual failure - don't collapse it to FAIL.
+                    status = 'PASS' if passed is True else ('FAIL' if passed is False else 'UNDETERMINED')
+                    ref_p_str = f"{ref_p:.4f}" if ref_p is not None else 'N/A'
+                    print(f"  Refutation [{test_name}]: p={ref_p_str}, {status}")
                 
                 results.append(row)
                 pair_count += 1
@@ -166,7 +171,13 @@ def run_causal_evaluation(
     print(f"{'=' * 60}")
     print(f"Total pairs evaluated: {len(df)}")
     
-    significant = df[df['p_value'].notna() & (df['p_value'] < 0.05)]
+    if 'p_value' in df.columns:
+        significant = df[df['p_value'].notna() & (df['p_value'] < 0.05)]
+    else:
+        # Every pair errored out (e.g. no valid data for any treatment/
+        # outcome pair) - nothing to summarize, but don't crash the run over it.
+        logger.warning("No pair produced a p_value - all estimations failed")
+        significant = pd.DataFrame()
     print(f"Statistically significant (p < 0.05): {len(significant)}")
     
     if len(significant) > 0:
