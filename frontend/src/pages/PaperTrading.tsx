@@ -1279,29 +1279,63 @@ const PaperTrading = () => {
                       {[1, 2, 3].map((i) => <Skeleton key={i} className="h-12 w-full" />)}
                     </div>
                   ) : recommendationsData?.recommendations ? (
-                    <div className="space-y-2">
-                      {recommendationsData.recommendations.map((rec: any, idx: number) => (
-                        <div key={idx} className="p-3 rounded-lg border bg-background/50">
-                          <div className="flex items-start gap-3">
-                            <div className={`p-2 rounded ${
-                              rec.action === 'buy' ? 'bg-green-500/10 text-green-500' :
-                              rec.action === 'sell' ? 'bg-red-500/10 text-red-500' :
-                              'bg-blue-500/10 text-blue-500'
-                            }`}>
-                              {rec.action === 'buy' ? <TrendingUp className="w-4 h-4" /> :
-                               rec.action === 'sell' ? <TrendingDown className="w-4 h-4" /> :
-                               <BarChart3 className="w-4 h-4" />}
-                            </div>
-                            <div className="flex-1">
-                              <p className="font-medium text-sm">{rec.sector || rec.asset}</p>
-                              <p className="text-xs text-muted-foreground">{rec.reason}</p>
-                            </div>
-                            <Badge variant="outline" className="text-xs capitalize">
-                              {rec.action}
-                            </Badge>
-                          </div>
+                    <div className="space-y-3">
+                      <div className="p-3 rounded-lg border bg-background/50">
+                        <div className="flex items-center justify-between mb-1">
+                          <p className="text-sm font-medium">Strategy</p>
+                          <Badge variant="outline" className="text-xs capitalize">
+                            {recommendationsData.recommendations.risk_level} risk
+                          </Badge>
                         </div>
-                      ))}
+                        <p className="text-xs text-muted-foreground">
+                          {recommendationsData.recommendations.strategy}
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="p-2 rounded-lg border bg-background/50 text-center">
+                          <p className="text-xs text-muted-foreground">Equity</p>
+                          <p className="text-sm font-semibold">
+                            {(recommendationsData.recommendations.equity_allocation * 100).toFixed(0)}%
+                          </p>
+                        </div>
+                        <div className="p-2 rounded-lg border bg-background/50 text-center">
+                          <p className="text-xs text-muted-foreground">Bonds</p>
+                          <p className="text-sm font-semibold">
+                            {(recommendationsData.recommendations.bond_allocation * 100).toFixed(0)}%
+                          </p>
+                        </div>
+                        <div className="p-2 rounded-lg border bg-background/50 text-center">
+                          <p className="text-xs text-muted-foreground">Cash</p>
+                          <p className="text-sm font-semibold">
+                            {(recommendationsData.recommendations.cash_allocation * 100).toFixed(0)}%
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        {Object.entries(recommendationsData.recommendations.sector_tilts).map(([sector, tilt]) => (
+                          <div key={sector} className="p-3 rounded-lg border bg-background/50">
+                            <div className="flex items-start gap-3">
+                              <div className={`p-2 rounded ${
+                                tilt === 'overweight' ? 'bg-green-500/10 text-green-500' :
+                                tilt === 'underweight' ? 'bg-red-500/10 text-red-500' :
+                                'bg-blue-500/10 text-blue-500'
+                              }`}>
+                                {tilt === 'overweight' ? <TrendingUp className="w-4 h-4" /> :
+                                 tilt === 'underweight' ? <TrendingDown className="w-4 h-4" /> :
+                                 <BarChart3 className="w-4 h-4" />}
+                              </div>
+                              <div className="flex-1">
+                                <p className="font-medium text-sm">{sector.replace(/_/g, ' ')}</p>
+                              </div>
+                              <Badge variant="outline" className="text-xs capitalize">
+                                {tilt}
+                              </Badge>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   ) : (
                     <div className="text-center py-8">
