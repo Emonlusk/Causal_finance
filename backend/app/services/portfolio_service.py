@@ -82,7 +82,15 @@ def calculate_portfolio_performance(portfolio, period: str = '1Y') -> Dict[str, 
             # Calculate metrics
             total_return = float(cumulative.iloc[-1]) * 100
             volatility = float(portfolio_returns.std() * np.sqrt(252) * 100)
-            sharpe_ratio = (total_return / 100) / (volatility / 100) if volatility > 0 else 0
+
+            # Sharpe ratio: annualize the (cumulative, non-annualized) total
+            # return to match the already-annualized volatility, and net out
+            # the risk-free rate - matching the convention used in
+            # compute_full_metrics elsewhere in this file.
+            days_elapsed = len(portfolio_returns)
+            annualized_return = (1 + total_return / 100) ** (252 / days_elapsed) - 1 if days_elapsed > 0 else 0
+            excess_return = annualized_return - RISK_FREE_RATE
+            sharpe_ratio = excess_return / (volatility / 100) if volatility > 0 else 0
             
             # Max drawdown
             rolling_max = (1 + portfolio_returns).cumprod().expanding().max()
