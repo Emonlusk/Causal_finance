@@ -1,0 +1,12 @@
+sector,treatment,cate_mean,cate_std,cate_5th,cate_95th,cate_median,n_samples
+Communication_Services,Fed_Funds_Rate_Change,0.000793,0.015699,-0.022244,0.028785,-0.000448,4138
+Consumer_Discretionary,Fed_Funds_Rate_Change,0.007562,0.022501,-0.0244,0.041584,0.005802,4138
+Consumer_Staples,Fed_Funds_Rate_Change,0.004086,0.0236,-0.031915,0.041064,0.004059,4138
+Energy,Fed_Funds_Rate_Change,0.027771,0.03748,-0.027659,0.088886,0.025048,4138
+Financials,Fed_Funds_Rate_Change,0.016675,0.035285,-0.036682,0.074062,0.014188,4138
+Healthcare,Fed_Funds_Rate_Change,0.005189,0.01518,-0.019103,0.029818,0.005229,4138
+Industrials,Fed_Funds_Rate_Change,0.010923,0.031148,-0.031766,0.062792,0.007732,4138
+Materials,Fed_Funds_Rate_Change,0.017747,0.023334,-0.013303,0.055214,0.015401,4138
+Real_Estate,Fed_Funds_Rate_Change,0.015168,0.033283,-0.032321,0.07065,0.012638,4138
+Technology,Fed_Funds_Rate_Change,0.007178,0.026781,-0.032843,0.053008,0.005343,4138
+Utilities,Fed_Funds_Rate_Change,0.010893,0.038528,-0.047288,0.072594,0.010759,4138

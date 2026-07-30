@@ -1,4 +1,4 @@
-Period,Start,End,annualized_return,sharpe_ratio,sortino_ratio,max_drawdown,calmar_ratio,var_95_daily,cvar_95_daily
-Pre-COVID,2018-01-01,2019-12-31,11.6892,0.5812,0.5328,-18.458,0.6333,-1.5046,-2.1727
-COVID Crash,2020-01-01,2020-12-31,6.5671,0.0727,0.0662,-36.4306,0.1803,-3.1397,-5.6867
-Post-COVID,2021-01-01,2023-12-31,15.5276,0.7651,0.7373,-15.2045,1.0213,-1.4622,-2.1422
+Period,Start,End,error,train_start,annualized_return,sharpe_ratio,sortino_ratio,max_drawdown,calmar_ratio,var_95_daily,cvar_95_daily
+Pre-COVID,2018-01-01,2019-12-31,Insufficient data: only 0 trading days available before test_start=2018-01-01 (need at least 126),,,,,,,,
+COVID Crash,2020-01-01,2020-12-31,,2018-06-20,13.0322,0.2754,0.258,-31.4661,0.4142,-2.5095,-5.1913
+Post-COVID,2021-01-01,2023-12-31,,2018-06-20,7.982,0.2525,0.2489,-20.4223,0.3908,-1.5829,-2.2888

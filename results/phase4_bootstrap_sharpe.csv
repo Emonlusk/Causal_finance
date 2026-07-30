@@ -1,0 +1,5 @@
+test,portfolio,sharpe_mean,sharpe_median,sharpe_std,ci_lower,ci_upper,confidence_level,n_bootstrap,n_observations
+Bootstrap Sharpe CI,Causal,0.061,0.0342,0.6648,-1.2023,1.4284,0.95,10000,30
+Bootstrap Sharpe CI,Equal Weight,0.0863,0.0894,0.6705,-1.2282,1.4399,0.95,10000,29
+Bootstrap Sharpe CI,Markowitz MPT,-0.0221,-0.0469,0.6617,-1.2666,1.3456,0.95,10000,30
+Bootstrap Sharpe CI,S&P 500 (SPY),0.1189,0.1083,0.6714,-1.1654,1.5246,0.95,10000,29

@@ -1,11 +1,11 @@
 {
-  "run_date": "2026-07-30T12:00:51.669384",
-  "duration_seconds": 188.0,
+  "run_date": "2026-07-30T14:38:16.472538",
+  "duration_seconds": 314.7,
   "phases": {
     "phase1": "COMPLETE",
-    "phase2": "FAILED: 'p_value'",
+    "phase2": "COMPLETE",
     "phase3": "COMPLETE",
-    "phase4": "SKIPPED: No backtest returns available",
+    "phase4": "COMPLETE",
     "phase5": "COMPLETE",
     "phase6": "COMPLETE",
     "phase7_charts": "3 items",
