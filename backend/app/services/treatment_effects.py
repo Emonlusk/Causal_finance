@@ -29,13 +29,21 @@ warnings.filterwarnings('ignore')
 class TreatmentEffectEstimator:
     """
     Estimates causal treatment effects from observational data.
-    
+
     Uses multiple methods and combines for robustness:
     1. DoWhy (when available) - Full causal inference framework
     2. EconML (when available) - Heterogeneous treatment effects
     3. Statistical methods - OLS, IV, matching as fallback
     """
-    
+
+    # Refutation pass/fail thresholds - a refuted estimate that drifts more
+    # than this from the original is treated as failing that refutation.
+    REFUTATION_RELATIVE_TOLERANCE = 0.25
+    # Placebo treatment should produce ~zero effect; this is how close to
+    # zero (relative to the original effect) counts as "passed".
+    REFUTATION_PLACEBO_MAX_RATIO = 0.10
+    REFUTATION_SIGNIFICANCE_LEVEL = 0.05
+
     def __init__(self, random_state: int = 42):
         """
         Initialize the treatment effect estimator.
@@ -70,7 +78,24 @@ class TreatmentEffectEstimator:
             self._sklearn_available = True
         except ImportError:
             logger.warning("scikit-learn not available")
-    
+
+    def _is_close(
+        self,
+        new_value: Optional[float],
+        reference: float,
+        tolerance: float
+    ) -> Optional[bool]:
+        """
+        True if new_value is within `tolerance` relative distance of
+        reference; None (undetermined) if new_value is missing rather than
+        guessing at a pass/fail.
+        """
+        if new_value is None:
+            return None
+        if reference == 0:
+            return abs(new_value) < 1e-6
+        return abs(new_value - reference) / abs(reference) < tolerance
+
     # ============================================
     # MAIN ESTIMATION METHODS
     # ============================================
@@ -160,6 +185,7 @@ class TreatmentEffectEstimator:
             )
             
             # Refutation tests — run all 4 required for paper
+            original_effect = float(estimate.value)
             refutation_results = []
             
             # 1. Add unobserved common cause
@@ -173,11 +199,18 @@ class TreatmentEffectEstimator:
                 ucc_p = None
                 if hasattr(ucc_refute, 'refutation_result') and isinstance(ucc_refute.refutation_result, dict):
                     ucc_p = ucc_refute.refutation_result.get('p_value', None)
+                # Primary criterion: the estimate should stay close to the
+                # original when an unobserved confounder is simulated in.
+                # The refuter's own p-value (testing new vs. original) is a
+                # secondary signal when available, not the sole gate.
+                magnitude_ok = self._is_close(ucc_new_effect, original_effect, self.REFUTATION_RELATIVE_TOLERANCE)
+                p_ok = ucc_p is None or ucc_p > self.REFUTATION_SIGNIFICANCE_LEVEL
+                ucc_passed = (magnitude_ok and p_ok) if magnitude_ok is not None else None
                 refutation_results.append({
                     'test': 'add_unobserved_common_cause',
                     'new_estimate': float(ucc_new_effect) if ucc_new_effect is not None else None,
                     'p_value': float(ucc_p) if ucc_p is not None else None,
-                    'passed': True  # Passes if new estimate is close to original
+                    'passed': ucc_passed
                 })
             except Exception as e:
                 logger.warning(f"Unobserved common cause refutation failed: {e}")
@@ -199,11 +232,19 @@ class TreatmentEffectEstimator:
                 placebo_p = None
                 if hasattr(placebo_refute, 'refutation_result') and isinstance(placebo_refute.refutation_result, dict):
                     placebo_p = placebo_refute.refutation_result.get('p_value', None)
+                # Permuting the treatment should destroy any real effect, so
+                # the placebo effect should be small relative to the original.
+                if placebo_new_effect is None:
+                    placebo_passed = None
+                elif original_effect == 0:
+                    placebo_passed = abs(placebo_new_effect) < 1e-6
+                else:
+                    placebo_passed = abs(placebo_new_effect) < self.REFUTATION_PLACEBO_MAX_RATIO * abs(original_effect)
                 refutation_results.append({
                     'test': 'placebo_treatment',
                     'new_estimate': float(placebo_new_effect) if placebo_new_effect is not None else None,
                     'p_value': float(placebo_p) if placebo_p is not None else None,
-                    'passed': True  # Passes if placebo effect ≈ 0
+                    'passed': placebo_passed
                 })
             except Exception as e:
                 logger.warning(f"Placebo treatment refutation failed: {e}")
@@ -225,11 +266,14 @@ class TreatmentEffectEstimator:
                 subset_p = None
                 if hasattr(subset_refute, 'refutation_result') and isinstance(subset_refute.refutation_result, dict):
                     subset_p = subset_refute.refutation_result.get('p_value', None)
+                # Subsetting the data shouldn't move the estimate much if the
+                # effect is real.
+                subset_passed = self._is_close(subset_new_effect, original_effect, self.REFUTATION_RELATIVE_TOLERANCE)
                 refutation_results.append({
                     'test': 'data_subset',
                     'new_estimate': float(subset_new_effect) if subset_new_effect is not None else None,
                     'p_value': float(subset_p) if subset_p is not None else None,
-                    'passed': True  # Passes if subset estimate ≈ full estimate
+                    'passed': subset_passed
                 })
             except Exception as e:
                 logger.warning(f"Data subset refutation failed: {e}")
@@ -251,11 +295,17 @@ class TreatmentEffectEstimator:
                 bootstrap_p = None
                 if hasattr(bootstrap_refute, 'refutation_result') and isinstance(bootstrap_refute.refutation_result, dict):
                     bootstrap_p = bootstrap_refute.refutation_result.get('p_value', None)
+                # Prefer the bootstrap refuter's own p-value when it's
+                # available; fall back to relative magnitude drift otherwise.
+                if bootstrap_p is not None:
+                    bootstrap_passed = bootstrap_p > self.REFUTATION_SIGNIFICANCE_LEVEL
+                else:
+                    bootstrap_passed = self._is_close(bootstrap_new_effect, original_effect, self.REFUTATION_RELATIVE_TOLERANCE)
                 refutation_results.append({
                     'test': 'bootstrap',
                     'new_estimate': float(bootstrap_new_effect) if bootstrap_new_effect is not None else None,
                     'p_value': float(bootstrap_p) if bootstrap_p is not None else None,
-                    'passed': True
+                    'passed': bootstrap_passed
                 })
             except Exception as e:
                 logger.warning(f"Bootstrap refutation failed: {e}")
