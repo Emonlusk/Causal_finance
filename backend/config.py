@@ -83,10 +83,15 @@ class ProductionConfig(Config):
     """Production configuration for Render/Heroku"""
     DEBUG = False
 
-    # Secret keys — Render auto-generates these via render.yaml generateValue
-    # Fallback ensures Flask doesn't crash during initial cold-start
-    SECRET_KEY = os.environ.get('SECRET_KEY') or os.urandom(32).hex()
-    JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY') or os.urandom(32).hex()
+    # Secret keys — Render auto-generates these via render.yaml generateValue.
+    # No random fallback: a fallback here would generate a *different* key
+    # per worker process/restart, silently breaking JWT verification across
+    # workers. `create_app()` validates these are actually set once this
+    # config is selected (checking here in the class body would run at
+    # *import* time for every environment, not just when production is
+    # selected, and would break dev/test whenever the env vars aren't set).
+    SECRET_KEY = os.environ.get('SECRET_KEY')
+    JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY')
 
     # CORS - set to all deployed frontend origins
     CORS_ORIGINS = os.environ.get(

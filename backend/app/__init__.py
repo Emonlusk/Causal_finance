@@ -21,7 +21,15 @@ def create_app(config_name='default'):
     """Application factory pattern"""
     app = Flask(__name__)
     app.config.from_object(config[config_name])
-    
+
+    if config_name == 'production' and not (app.config.get('SECRET_KEY') and app.config.get('JWT_SECRET_KEY')):
+        raise RuntimeError(
+            'SECRET_KEY and JWT_SECRET_KEY must be set in the production environment. '
+            'A random per-process fallback was removed because it silently breaks JWT '
+            'verification across gunicorn workers/restarts - set both env vars instead '
+            '(render.yaml already declares them with generateValue: true).'
+        )
+
     # Initialize extensions
     db.init_app(app)
     migrate.init_app(app, db)
