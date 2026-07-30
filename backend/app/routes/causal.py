@@ -262,8 +262,35 @@ def discover_causal_relationships():
         common = sector_df.index.intersection(macro_df.index)
         sector_df, macro_df = sector_df.loc[common], macro_df.loc[common]
 
-        engine = CausalDiscoveryEngine()
-        relationships = engine.discover_all_relationships(sector_df, macro_df)
+        if sector_df.empty or macro_df.empty:
+            return jsonify({
+                'method': method, 'sectors': sectors, 'relationships': {},
+                'status': 'error',
+                'note': 'Market data unavailable for causal discovery'
+            }), 503
+
+        # discover_all_relationships tests every ordered pair within ONE
+        # combined variable list, not two separate cause/effect groups - so
+        # sector and macro columns have to live in the same DataFrame here.
+        # Only 'granger'/'pc'/'transfer_entropy'/'correlation' are real
+        # methods it understands; anything else falls back to 'granger'.
+        combined_df = pd.concat([sector_df, macro_df], axis=1)
+        macro_cols = set(macro_df.columns)
+        sector_cols = set(sector_df.columns)
+        run_methods = [method] if method in ('granger', 'pc', 'transfer_entropy', 'correlation') else ['granger']
+
+        engine = CausalDiscoveryEngine(significance_level=significance)
+        all_relationships = engine.discover_all_relationships(
+            combined_df, variables=list(combined_df.columns), methods=run_methods
+        )
+
+        # This endpoint exists to find macro drivers of sector returns, not
+        # sector-sector or macro-macro relationships that fall out of testing
+        # every pair - keep only macro -> sector edges.
+        relationships = [
+            r for r in all_relationships
+            if r.get('cause') in macro_cols and r.get('effect') in sector_cols
+        ]
 
         return jsonify({
             'method': method,
@@ -272,14 +299,14 @@ def discover_causal_relationships():
             'status': 'success'
         }), 200
     except Exception as e:
-        logger.error(f"Causal discovery failed: {e}")
+        logger.exception(f"Causal discovery failed for sectors={sectors}, method={method}")
         return jsonify({
             'method': method,
             'sectors': sectors,
             'relationships': {},
-            'status': 'fallback',
-            'note': 'Returning empty relationships due to data unavailability'
-        }), 200
+            'status': 'error',
+            'note': f'Causal discovery failed: {e}'
+        }), 500
 
 
 @causal_bp.route('/treatment-effect', methods=['POST'])

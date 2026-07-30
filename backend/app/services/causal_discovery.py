@@ -121,7 +121,7 @@ class CausalDiscoveryEngine:
                         best_fstat = f_stat
                         best_lag = lag
             
-            is_causal = best_pvalue < self.significance_level
+            is_causal = bool(best_pvalue < self.significance_level)
             
             return {
                 'cause': cause_col,
@@ -172,7 +172,7 @@ class CausalDiscoveryEngine:
                 'cause': cause_col,
                 'effect': effect_col,
                 'method': 'lagged_correlation',
-                'is_causal': best_pvalue < self.significance_level and abs(best_corr) > 0.1,
+                'is_causal': bool(best_pvalue < self.significance_level and abs(best_corr) > 0.1),
                 'correlation': float(best_corr),
                 'p_value': float(best_pvalue),
                 'optimal_lag': best_lag,
