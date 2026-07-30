@@ -541,10 +541,14 @@ export interface QuoteData {
 }
 
 export interface BenchmarkData {
-  current_price: number;
-  total_return: number;
-  volatility: number;
-  time_series: { date: string; close: number; return_pct: number }[];
+  benchmark: string;
+  period: string;
+  data: {
+    current_price: number;
+    total_return: number;
+    volatility: number;
+    time_series: { date: string; close: number; return_pct: number }[];
+  };
 }
 
 export interface MarketCondition {

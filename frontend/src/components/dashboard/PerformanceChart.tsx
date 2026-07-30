@@ -36,63 +36,55 @@ export function PerformanceChart() {
   const isLoading = loadingBenchmark || loadingPortfolios || loadingPortfolio;
   
   // Check if we're using simulated/fallback data
-  const isUsingFallbackData = !benchmarkData?.time_series?.length;
+  const isUsingFallbackData = !benchmarkData?.data?.time_series?.length;
 
   // Transform API data into chart format
   const chartData = useMemo(() => {
-    const benchmarkTimeSeries = benchmarkData?.time_series || [];
-    const portfolioTimeSeries = portfolioPerf?.historical || [];
+    const benchmarkTimeSeries = benchmarkData?.data?.time_series || [];
+    const portfolioTimeSeries = portfolioPerf?.performance?.time_series || [];
     
     if (benchmarkTimeSeries.length === 0) {
       // Generate fallback data if API not available
       const data = [];
       let portfolio = 100;
       let sp500 = 100;
-      let causal = 100;
 
       const monthCount = selectedTimeframe === '1M' ? 4 : selectedTimeframe === '3M' ? 12 : 12;
       for (let i = 0; i < monthCount; i++) {
         const date = new Date();
         date.setMonth(date.getMonth() - (monthCount - 1 - i));
         const month = date.toLocaleString("default", { month: "short" });
-        
+
         portfolio += (Math.random() - 0.3) * 8;
-        causal += (Math.random() - 0.25) * 7;
         sp500 += (Math.random() - 0.35) * 6;
-        
+
         data.push({
           month,
           portfolio: Math.round(portfolio * 10) / 10,
-          causal: Math.round(causal * 10) / 10,
           sp500: Math.round(sp500 * 10) / 10,
         });
       }
       return data;
     }
 
-    // Merge benchmark and portfolio data
+    // Merge benchmark and portfolio data. Both are indexed to start at 100
+    // so they're comparable on the same scale: the benchmark from its raw
+    // close price, the portfolio from its already-cumulative % return.
+    const benchmarkBase = benchmarkTimeSeries[0]?.close || 1;
+
     return benchmarkTimeSeries.map((point, index) => {
       const date = new Date(point.date);
       const month = date.toLocaleString("default", { month: "short" });
-      
-      // Normalize to percentage returns starting at 100
-      const benchmarkBase = benchmarkTimeSeries[0]?.close || 1;
-      const portfolioBase = portfolioTimeSeries[0]?.value || 1;
-      
-      const sp500Value = ((point.close / benchmarkBase) * 100);
+
+      const sp500Value = (point.close / benchmarkBase) * 100;
       const portfolioPoint = portfolioTimeSeries[index];
-      const portfolioValue = portfolioPoint 
-        ? ((portfolioPoint.value / portfolioBase) * 100) 
-        : sp500Value + (Math.random() - 0.5) * 5; // Simulated if no data
-      
-      // Causal optimized: sensitivity-adjusted return with regime-based cyclical alpha
-      const causalAlpha = 0.003 * Math.sin(index * 0.5);
-      const causalValue = portfolioValue * (1 + causalAlpha);
+      const portfolioValue = portfolioPoint
+        ? 100 + portfolioPoint.return
+        : sp500Value + (Math.random() - 0.5) * 5; // Simulated if no portfolio data for this date
 
       return {
         month,
         portfolio: Math.round(portfolioValue * 10) / 10,
-        causal: Math.round(causalValue * 10) / 10,
         sp500: Math.round(sp500Value * 10) / 10,
       };
     });
@@ -105,7 +97,6 @@ export function PerformanceChart() {
     const last = chartData[chartData.length - 1];
     return {
       portfolioReturn: ((last.portfolio - first.portfolio) / first.portfolio * 100).toFixed(1),
-      causalReturn: ((last.causal - first.causal) / first.causal * 100).toFixed(1),
       sp500Return: ((last.sp500 - first.sp500) / first.sp500 * 100).toFixed(1),
     };
   }, [chartData]);
@@ -197,14 +188,6 @@ export function PerformanceChart() {
                   dataKey="portfolio"
                   name="Your Portfolio"
                   stroke="hsl(var(--primary))"
-                  strokeWidth={2}
-                  dot={false}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="causal"
-                  name="Causal Optimized"
-                  stroke="hsl(var(--accent))"
                   strokeWidth={2}
                   dot={false}
                 />
