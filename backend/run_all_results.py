@@ -214,14 +214,12 @@ def main():
     
     try:
         from scripts.phase6_robustness import run_robustness
-        
-        # Get causal weights for robustness checks
-        causal_weights = None
-        if backtest_results and 'Causal Portfolio' in backtest_results:
-            causal_weights = backtest_results['Causal Portfolio'].get('weights')
-        
-        robustness_results = run_robustness(weights=causal_weights, assets=UNIVERSE)
-        
+
+        # Each check now derives its own point-in-time weights internally
+        # (see phase6_robustness.py) rather than reusing one weight vector
+        # computed from present-day data across every historical window.
+        robustness_results = run_robustness(assets=UNIVERSE)
+
         for check_name, check_df in robustness_results.items():
             if isinstance(check_df, pd.DataFrame) and not check_df.empty:
                 save_csv(check_df, f'phase6_{check_name}.csv')

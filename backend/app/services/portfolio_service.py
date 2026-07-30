@@ -9,7 +9,7 @@ Implements:
 - All paper-required performance measures (Sharpe, Sortino, Calmar, VaR, CVaR, etc.)
 """
 
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional, Tuple, Callable
 import logging
 import numpy as np
 import pandas as pd
@@ -786,7 +786,8 @@ def run_walk_forward_backtest(
     start_date: str = '2010-01-01',
     end_date: str = '2024-01-01',
     first_test_start: Optional[str] = None,
-    transaction_cost_bps: float = TRANSACTION_COST_BPS
+    transaction_cost_bps: float = TRANSACTION_COST_BPS,
+    weight_fn: Optional[Callable[[pd.DataFrame, str, List[str]], np.ndarray]] = None
 ) -> Dict[str, Any]:
     """
     Run walk-forward (rolling window) cross-validation backtest. This is the
@@ -808,7 +809,8 @@ def run_walk_forward_backtest(
         n_folds: Maximum number of rolling folds (actual count is capped by
             available data through end_date - this just needs to be large
             enough not to be the limiting factor)
-        use_causal: Whether to use causal optimization
+        use_causal: Whether to use causal optimization (ignored if weight_fn
+            is given)
         start_date: Earliest date to pull price history from
         end_date: Overall end date
         first_test_start: If given, anchor fold 0's test window to start at
@@ -816,6 +818,12 @@ def run_walk_forward_backtest(
             than immediately after `train_window` days from `start_date`.
         transaction_cost_bps: Round-trip cost charged at each rebalance,
             based on turnover between consecutive folds' weights.
+        weight_fn: Optional custom weight-computation strategy, called once
+            per fold as weight_fn(train_returns, as_of_date, columns) ->
+            weight array aligned to `columns`. Lets callers (e.g. ablation
+            studies) swap in a different weighting approach while still
+            getting point-in-time-correct, leak-free folds for free. When
+            omitted, falls back to the standard Markowitz/causal path.
 
     Returns:
         Dictionary with per-fold and aggregate results
@@ -856,22 +864,24 @@ def run_walk_forward_backtest(
             test_returns = returns.iloc[train_end:test_end]
             as_of_date = returns.index[train_end - 1].strftime('%Y-%m-%d')
 
-            # Compute mean returns and covariance from training data only
-            mean_ret = train_returns.mean().values * 252
-            cov_mat = train_returns.cov().values * 252
+            if weight_fn is not None:
+                weights_arr = weight_fn(train_returns, as_of_date, list(train_returns.columns))
+            else:
+                # Compute mean returns and covariance from training data only
+                mean_ret = train_returns.mean().values * 252
+                cov_mat = train_returns.cov().values * 252
 
-            # Optimize on training data
-            weights_arr = _optimize_markowitz(mean_ret, cov_mat, 'max_sharpe')
+                weights_arr = _optimize_markowitz(mean_ret, cov_mat, 'max_sharpe')
 
-            if use_causal:
-                try:
-                    weights_arr, _ = _optimize_with_causal(
-                        mean_ret, cov_mat, 'max_sharpe',
-                        list(train_returns.columns), None,
-                        as_of_date=as_of_date
-                    )
-                except Exception:
-                    pass  # Fall back to Markowitz weights
+                if use_causal:
+                    try:
+                        weights_arr, _ = _optimize_with_causal(
+                            mean_ret, cov_mat, 'max_sharpe',
+                            list(train_returns.columns), None,
+                            as_of_date=as_of_date
+                        )
+                    except Exception:
+                        pass  # Fall back to Markowitz weights
 
             # Test on out-of-sample data
             portfolio_cols = [c for c in test_returns.columns if c in assets]
@@ -936,4 +946,125 @@ def run_walk_forward_backtest(
 
     except Exception as e:
         logger.error(f"Walk-forward backtest error: {e}")
+        return {'error': str(e)}
+
+
+def run_single_period_backtest(
+    assets: List[str],
+    test_start: str,
+    test_end: str,
+    train_window: int = 252 * 3,
+    min_train_window: int = 126,
+    use_causal: bool = True,
+    transaction_cost_bps: float = TRANSACTION_COST_BPS,
+    weight_fn: Optional[Callable[[pd.DataFrame, str, List[str]], np.ndarray]] = None
+) -> Dict[str, Any]:
+    """
+    One train/test split, anchored at an arbitrary historical test_start:
+    train on the `train_window` trading days immediately preceding
+    test_start, then test on [test_start, test_end]. This is
+    run_walk_forward_backtest with a single fold - for checks that need a
+    specific historical boundary (a named sub-period, a shifted split date)
+    rather than a rolling series of folds, while keeping the same
+    point-in-time guarantee: weights are chosen using only data available
+    before test_start, never data from the test window itself.
+
+    Args:
+        assets: List of ticker symbols
+        test_start: Start of the out-of-sample test window
+        test_end: End of the out-of-sample test window
+        train_window: Training window size in trading days, ending the
+            trading day before test_start
+        min_train_window: Minimum trading days of prior history required to
+            proceed. If less than train_window is actually available before
+            test_start (e.g. a sub-period starting shortly after the asset
+            universe's youngest member began trading), uses whatever's
+            available rather than requiring the full window - a real
+            investor at that point wouldn't have had more history either.
+            Errors only if even this minimum isn't available.
+        use_causal: Whether to use causal optimization (ignored if
+            weight_fn is given)
+        transaction_cost_bps: Round-trip cost charged for the single entry
+            into this position
+        weight_fn: Optional custom weight-computation strategy, see
+            run_walk_forward_backtest for the calling convention
+
+    Returns:
+        Dictionary with metrics, weights, and the realized train/test dates
+    """
+    try:
+        from app.services.price_store import get_price_store
+
+        prices = get_price_store().get_history(assets + ['SPY'], end=test_end)
+        if prices.empty:
+            return {'error': 'Could not fetch data for single-period backtest'}
+
+        returns = prices.pct_change().dropna()
+        n_total = len(returns)
+
+        test_start_idx = int(returns.index.searchsorted(pd.Timestamp(test_start)))
+        train_start_idx = max(0, test_start_idx - train_window)
+        test_end_idx = int(returns.index.searchsorted(pd.Timestamp(test_end), side='right'))
+        test_end_idx = min(test_end_idx, n_total)
+
+        available_train_days = test_start_idx - train_start_idx
+        if available_train_days < min_train_window or test_start_idx >= test_end_idx:
+            return {'error': f'Insufficient data: only {max(available_train_days, 0)} trading '
+                              f'days available before test_start={test_start} '
+                              f'(need at least {min_train_window})'}
+
+        train_returns = returns.iloc[train_start_idx:test_start_idx]
+        test_returns = returns.iloc[test_start_idx:test_end_idx]
+        as_of_date = returns.index[test_start_idx - 1].strftime('%Y-%m-%d')
+
+        if weight_fn is not None:
+            weights_arr = weight_fn(train_returns, as_of_date, list(train_returns.columns))
+        else:
+            mean_ret = train_returns.mean().values * 252
+            cov_mat = train_returns.cov().values * 252
+
+            weights_arr = _optimize_markowitz(mean_ret, cov_mat, 'max_sharpe')
+
+            if use_causal:
+                try:
+                    weights_arr, _ = _optimize_with_causal(
+                        mean_ret, cov_mat, 'max_sharpe',
+                        list(train_returns.columns), None,
+                        as_of_date=as_of_date
+                    )
+                except Exception:
+                    pass
+
+        portfolio_cols = [c for c in test_returns.columns if c in assets]
+        test_asset_returns = test_returns[portfolio_cols]
+        weight_vec = np.array([weights_arr[list(returns.columns).index(c)]
+                               for c in portfolio_cols if c in returns.columns])
+        if np.sum(weight_vec) > 0:
+            weight_vec = weight_vec / np.sum(weight_vec)
+
+        oos_returns = test_asset_returns.dot(weight_vec).values
+        weight_dict = dict(zip(portfolio_cols, weight_vec.tolist()))
+
+        cost_adjusted = apply_transaction_costs(
+            oos_returns, [weight_dict], transaction_cost_bps, rebalance_indices=[0]
+        )
+
+        bench_returns = test_returns['SPY'].values if 'SPY' in test_returns.columns else None
+        metrics = compute_full_metrics(
+            cost_adjusted, benchmark_returns=bench_returns, risk_free_rate=RISK_FREE_RATE
+        )
+
+        return {
+            **metrics,
+            'weights': {k: round(v, 4) for k, v in weight_dict.items()},
+            'train_start': returns.index[train_start_idx].strftime('%Y-%m-%d'),
+            'train_end': as_of_date,
+            'test_start': returns.index[test_start_idx].strftime('%Y-%m-%d'),
+            'test_end': returns.index[test_end_idx - 1].strftime('%Y-%m-%d'),
+            'transaction_cost_bps': transaction_cost_bps,
+            'daily_returns': cost_adjusted.tolist(),
+        }
+
+    except Exception as e:
+        logger.error(f"Single-period backtest error: {e}")
         return {'error': str(e)}
