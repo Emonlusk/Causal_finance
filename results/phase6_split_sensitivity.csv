@@ -1,0 +1,4 @@
+Split,Test_Start,annualized_return,sharpe_ratio,sortino_ratio,max_drawdown
+Early (-6m),2020-11-01,19.3257,1.0102,0.989,-15.2045
+Baseline,2021-05-01,11.3861,0.4825,0.4671,-15.2045
+Late (+6m),2021-11-01,8.8759,0.3018,0.2918,-15.2045

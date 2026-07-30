@@ -1,0 +1,6 @@
+Ablation,Description,annualized_return,annualized_volatility,sharpe_ratio,sortino_ratio,max_drawdown,calmar_ratio,var_95_daily,cvar_95_daily,delta_sharpe_vs_full
+full_model,Full Causal Model,11.3861,15.3072,0.4825,0.4671,-15.2045,0.7489,-1.4634,-2.1751,0.0
+no_causal_graph,Correlation-based weights (no causal structure),11.2663,15.2538,0.4764,0.4639,-15.2803,0.7373,-1.4638,-2.1717,-0.0061
+no_refutation,Raw ATE without refutation validation,11.3861,15.3072,0.4825,0.4671,-15.2045,0.7489,-1.4634,-2.1751,0.0
+no_cate,Uniform ATE (no heterogeneous CATE by sector),11.2655,15.2526,0.4763,0.4639,-15.2777,0.7374,-1.4636,-2.1716,-0.0062
+alt_treatment,VIX as primary treatment (replaces interest rate),11.222,15.2158,0.4746,0.4622,-15.2371,0.7365,-1.463,-2.1679,-0.0079

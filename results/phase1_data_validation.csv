@@ -1,0 +1,10 @@
+Check,Value,Status
+Dataset Rows,6018,OK
+Dataset Columns,78,OK
+Date Range Start,2010-01-01 00:00:00,OK
+Date Range End,2026-07-02 00:00:00,OK
+Total Nulls,0,OK
+High Correlations (>0.85),28,WARNING
+Train End Date,2021-04-30,OK
+Test Start Date,2021-05-01,OK
+Non-Stationary Variables,1,WARNING
