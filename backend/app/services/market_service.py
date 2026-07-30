@@ -423,6 +423,49 @@ def get_current_indicators() -> Dict[str, Any]:
     return indicators
 
 
+def get_indicators_as_of(as_of_date: str) -> Dict[str, Any]:
+    """
+    Point-in-time SPY/VIX/10Y-treasury indicators for a historical date,
+    sourced from stored daily closes rather than a live quote.
+
+    Used by the walk-forward backtest so that a fold's causal return
+    adjustment only sees data available as of that fold's training cutoff,
+    instead of leaking today's live market state into a historical decision.
+    """
+    from app.services.price_store import get_price_store
+
+    symbols = {'sp500': 'SPY', 'vix': '^VIX', 'treasury_10y': '^TNX'}
+    labels = {'sp500': 'S&P 500 (SPY)', 'vix': 'VIX (Volatility)', 'treasury_10y': '10Y Treasury'}
+
+    history = get_price_store().get_history(list(symbols.values()), end=as_of_date, refresh=False)
+
+    indicators: Dict[str, Any] = {}
+    for key, sym in symbols.items():
+        series = history[sym].dropna() if sym in history.columns else pd.Series(dtype=float)
+        if series.empty:
+            indicators[key] = {
+                'value': None, 'change': None, 'label': labels[key],
+                'trend': 'neutral', 'unavailable': True,
+            }
+            continue
+
+        value = float(series.iloc[-1])
+        change_pct = float(series.pct_change().iloc[-1] * 100) if len(series) > 1 else 0.0
+        d = {
+            'value': value,
+            'change': change_pct,
+            'label': labels[key],
+            'trend': 'up' if change_pct > 0 else ('down' if change_pct < 0 else 'neutral'),
+            'as_of': series.index[-1].strftime('%Y-%m-%d'),
+            'source': 'historical',
+        }
+        if key == 'treasury_10y':
+            d['unit'] = '%'
+        indicators[key] = d
+
+    return indicators
+
+
 def get_fred_data(series: Optional[str] = None) -> Dict[str, Any]:
     """
     Macro data from FRED. Computes CPI YoY inflation properly.

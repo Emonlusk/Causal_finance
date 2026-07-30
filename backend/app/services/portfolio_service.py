@@ -279,20 +279,27 @@ def _optimize_with_causal(
     cov_matrix: np.ndarray,
     objective: str,
     assets: List[str],
-    causal_model_id: Optional[int]
+    causal_model_id: Optional[int],
+    as_of_date: Optional[str] = None
 ) -> tuple:
     """
     Optimize portfolio with causal adjustments to expected returns.
     Uses ML-trained sensitivity matrix when available.
+
+    Args:
+        as_of_date: If given, use market indicators as of this historical
+            date (for backtesting) instead of a live quote, so a fold under
+            test can't see market conditions that hadn't happened yet.
     """
     from app.services.causal_service import get_active_sensitivity_matrix
-    from app.services.market_service import get_current_indicators
-    
+    from app.services.market_service import get_current_indicators, get_indicators_as_of
+
     active_matrix = get_active_sensitivity_matrix()
-    
-    # Fetch live market indicators for causal adjustment
+
+    # Fetch market indicators for causal adjustment: point-in-time for a
+    # backtest fold, live for real-time/production use.
     try:
-        indicators = get_current_indicators()
+        indicators = get_indicators_as_of(as_of_date) if as_of_date else get_current_indicators()
         # Derive directional economic forecasts from current levels
         # Fed rate direction: above 4% → tightening (+), below → easing (-)
         fed_rate = indicators.get('treasury_10y', {}).get('value', 4.5)
@@ -717,32 +724,48 @@ def run_backtest(
 def apply_transaction_costs(
     returns_series: np.ndarray,
     weights_history: List[Dict[str, float]],
-    cost_bps: float
+    cost_bps: float,
+    rebalance_indices: Optional[List[int]] = None
 ) -> np.ndarray:
     """
-    Apply round-trip transaction costs in basis points.
-    
+    Apply round-trip transaction costs in basis points at each rebalance.
+
     Args:
         returns_series: Array of daily portfolio returns
-        weights_history: List of weight dicts at each rebalance point
+        weights_history: List of weight dicts at each rebalance point,
+            weights_history[0] is the initial entry (compared against an
+            empty/all-cash portfolio, so it still carries an entry cost)
         cost_bps: Transaction cost in basis points (e.g., 10 = 10bps)
-    
+        rebalance_indices: Index into returns_series where each entry in
+            weights_history takes effect. If omitted, assumes monthly
+            rebalancing (21 trading days apart) for backward compatibility.
+
     Returns:
         Adjusted return series with costs subtracted
     """
     adjusted = returns_series.copy()
     cost_per_trade = cost_bps / 10000.0
-    
-    if len(weights_history) > 1:
-        for t in range(1, len(weights_history)):
-            all_assets = set(weights_history[t].keys()) | set(weights_history[t-1].keys())
-            turnover = sum(abs(weights_history[t].get(s, 0) - weights_history[t-1].get(s, 0))
-                          for s in all_assets)
-            cost = 0.5 * turnover * cost_per_trade  # Half-turn cost
-            # Map rebalance to return index (assuming monthly rebalancing = 21 trading days)
+
+    if not weights_history:
+        return adjusted
+
+    prev_weights: Dict[str, float] = {}
+    for t, weights in enumerate(weights_history):
+        all_assets = set(weights.keys()) | set(prev_weights.keys())
+        turnover = sum(abs(weights.get(s, 0) - prev_weights.get(s, 0)) for s in all_assets)
+        cost = 0.5 * turnover * cost_per_trade  # Half-turn cost
+
+        if rebalance_indices is not None:
+            if t >= len(rebalance_indices):
+                break
+            idx = rebalance_indices[t]
+        else:
             idx = min(t * 21, len(adjusted) - 1)
+
+        if 0 <= idx < len(adjusted):
             adjusted[idx] -= cost
-    
+        prev_weights = weights
+
     return adjusted
 
 
@@ -750,29 +773,42 @@ def run_walk_forward_backtest(
     assets: List[str],
     train_window: int = 252 * 3,
     test_window: int = 63,
-    n_folds: int = 4,
+    n_folds: int = 20,
     use_causal: bool = True,
-    start_date: str = '2018-01-01',
-    end_date: str = '2024-01-01'
+    start_date: str = '2010-01-01',
+    end_date: str = '2024-01-01',
+    first_test_start: Optional[str] = None,
+    transaction_cost_bps: float = TRANSACTION_COST_BPS
 ) -> Dict[str, Any]:
     """
-    Run walk-forward (rolling window) cross-validation backtest.
-    
+    Run walk-forward (rolling window) cross-validation backtest. This is the
+    leak-free alternative to a single optimize-then-backtest pass: every
+    fold's weights are chosen using only data available before that fold's
+    test window begins.
+
     Each fold:
-    1. Train on train_window days
-    2. Optimize weights
-    3. Test on test_window days
-    4. Roll forward
-    
+    1. Train on train_window days ending at some historical cutoff
+    2. Optimize weights (causal adjustment, if used, sees only market
+       indicators as of that cutoff - not live/current data)
+    3. Test on the following, unseen test_window days
+    4. Roll forward by test_window days and repeat
+
     Args:
         assets: List of ticker symbols
         train_window: Training window size in trading days
         test_window: Testing window size in trading days
-        n_folds: Number of rolling folds
+        n_folds: Maximum number of rolling folds (actual count is capped by
+            available data through end_date - this just needs to be large
+            enough not to be the limiting factor)
         use_causal: Whether to use causal optimization
-        start_date: Overall start date
+        start_date: Earliest date to pull price history from
         end_date: Overall end date
-    
+        first_test_start: If given, anchor fold 0's test window to start at
+            this date (e.g. the paper's declared out-of-sample start) rather
+            than immediately after `train_window` days from `start_date`.
+        transaction_cost_bps: Round-trip cost charged at each rebalance,
+            based on turnover between consecutive folds' weights.
+
     Returns:
         Dictionary with per-fold and aggregate results
     """
@@ -783,77 +819,113 @@ def run_walk_forward_backtest(
             assets + ['SPY'], start=start_date, end=end_date)
         if prices.empty:
             return {'error': 'Could not fetch data for walk-forward backtest'}
-        
+
         returns = prices.pct_change().dropna()
         n_total = len(returns)
-        
+
+        if first_test_start:
+            target_idx = int(returns.index.searchsorted(pd.Timestamp(first_test_start)))
+            fold0_train_start = max(0, target_idx - train_window)
+        else:
+            fold0_train_start = 0
+
         fold_results = []
-        all_oos_returns = []
-        
+        all_oos_returns: List[float] = []
+        all_bench_returns: List[float] = []
+        weights_history: List[Dict[str, float]] = []
+        fold_start_positions: List[int] = []
+
         for fold in range(n_folds):
-            train_start = fold * test_window
+            train_start = fold0_train_start + fold * test_window
             train_end = train_start + train_window
             test_end = train_end + test_window
-            
+
             if test_end > n_total:
                 break
-            
-            # Training data
+
+            # Training data - strictly precedes the test window
             train_returns = returns.iloc[train_start:train_end]
             test_returns = returns.iloc[train_end:test_end]
-            
-            # Compute mean returns and covariance from training data
+            as_of_date = returns.index[train_end - 1].strftime('%Y-%m-%d')
+
+            # Compute mean returns and covariance from training data only
             mean_ret = train_returns.mean().values * 252
             cov_mat = train_returns.cov().values * 252
-            
+
             # Optimize on training data
             weights_arr = _optimize_markowitz(mean_ret, cov_mat, 'max_sharpe')
-            
+
             if use_causal:
                 try:
                     weights_arr, _ = _optimize_with_causal(
-                        mean_ret, cov_mat, 'max_sharpe', 
-                        list(train_returns.columns), None
+                        mean_ret, cov_mat, 'max_sharpe',
+                        list(train_returns.columns), None,
+                        as_of_date=as_of_date
                     )
                 except Exception:
                     pass  # Fall back to Markowitz weights
-            
+
             # Test on out-of-sample data
             portfolio_cols = [c for c in test_returns.columns if c in assets]
             test_asset_returns = test_returns[portfolio_cols]
-            weight_vec = np.array([weights_arr[list(returns.columns).index(c)] 
+            weight_vec = np.array([weights_arr[list(returns.columns).index(c)]
                                    for c in portfolio_cols if c in returns.columns])
             if np.sum(weight_vec) > 0:
                 weight_vec = weight_vec / np.sum(weight_vec)
-            
+
             oos_returns = test_asset_returns.dot(weight_vec).values
-            all_oos_returns.extend(oos_returns)
-            
-            # Per-fold metrics
-            fold_metrics = compute_full_metrics(oos_returns, risk_free_rate=RISK_FREE_RATE)
-            fold_metrics['fold'] = fold + 1
-            fold_metrics['train_start'] = returns.index[train_start].strftime('%Y-%m-%d')
-            fold_metrics['train_end'] = returns.index[train_end - 1].strftime('%Y-%m-%d')
-            fold_metrics['test_start'] = returns.index[train_end].strftime('%Y-%m-%d')
-            fold_metrics['test_end'] = returns.index[min(test_end - 1, n_total - 1)].strftime('%Y-%m-%d')
-            fold_results.append(fold_metrics)
-        
-        # Aggregate out-of-sample metrics
-        if all_oos_returns:
-            aggregate_metrics = compute_full_metrics(
-                np.array(all_oos_returns), risk_free_rate=RISK_FREE_RATE
-            )
-        else:
-            aggregate_metrics = {}
-        
+
+            weights_history.append(dict(zip(portfolio_cols, weight_vec.tolist())))
+            fold_start_positions.append(len(all_oos_returns))
+            all_oos_returns.extend(oos_returns.tolist())
+            if 'SPY' in test_returns.columns:
+                all_bench_returns.extend(test_returns['SPY'].values.tolist())
+
+            fold_results.append({
+                'fold': fold + 1,
+                'train_start': returns.index[train_start].strftime('%Y-%m-%d'),
+                'train_end': returns.index[train_end - 1].strftime('%Y-%m-%d'),
+                'test_start': returns.index[train_end].strftime('%Y-%m-%d'),
+                'test_end': returns.index[min(test_end - 1, n_total - 1)].strftime('%Y-%m-%d'),
+                '_n_test_days': len(oos_returns),
+            })
+
+        if not all_oos_returns:
+            return {'error': 'No folds fit in the requested date range'}
+
+        # Apply turnover-based transaction costs at each fold's rebalance point
+        cost_adjusted_returns = apply_transaction_costs(
+            np.array(all_oos_returns), weights_history,
+            transaction_cost_bps, rebalance_indices=fold_start_positions
+        )
+
+        bench_arr = np.array(all_bench_returns) if len(all_bench_returns) == len(cost_adjusted_returns) else None
+
+        # Recompute each fold's metrics on its cost-adjusted slice
+        for i, fold_metrics in enumerate(fold_results):
+            start_pos = fold_start_positions[i]
+            end_pos = fold_start_positions[i + 1] if i + 1 < len(fold_start_positions) else len(cost_adjusted_returns)
+            fold_slice = cost_adjusted_returns[start_pos:end_pos]
+            fold_bench = bench_arr[start_pos:end_pos] if bench_arr is not None else None
+            fold_metrics.pop('_n_test_days')
+            computed = compute_full_metrics(fold_slice, benchmark_returns=fold_bench, risk_free_rate=RISK_FREE_RATE)
+            fold_metrics.update(computed)
+
+        aggregate_metrics = compute_full_metrics(
+            cost_adjusted_returns, benchmark_returns=bench_arr,
+            risk_free_rate=RISK_FREE_RATE, weights_history=weights_history
+        )
+
         return {
             'n_folds': len(fold_results),
             'train_window_days': train_window,
             'test_window_days': test_window,
+            'transaction_cost_bps': transaction_cost_bps,
             'fold_results': fold_results,
-            'aggregate': aggregate_metrics
+            'aggregate': aggregate_metrics,
+            'daily_returns': cost_adjusted_returns.tolist(),
         }
-        
+
     except Exception as e:
         logger.error(f"Walk-forward backtest error: {e}")
         return {'error': str(e)}
