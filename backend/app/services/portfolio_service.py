@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 RISK_FREE_RATE = 0.04
 MAX_SECTOR_WEIGHT = 0.20
 TRANSACTION_COST_BPS = 10
+CAUSAL_BLEND_RATIO = 0.30  # Weight on the causal-adjusted signal vs. traditional returns
 
 # Sector ETF mapping
 SECTOR_ETFS = {
@@ -364,9 +365,19 @@ def _optimize_with_causal(
                     'reason': f"Causal adjustment based on economic forecast"
                 })
     
-    # Optimize with adjusted returns
-    causal_weights = _optimize_markowitz(adjusted_returns, cov_matrix, objective)
-    
+    # Blend the causal-adjusted returns with the unadjusted traditional
+    # returns per CAUSAL_BLEND_RATIO, rather than feeding the fully-adjusted
+    # vector straight into the optimizer. `adjusted_returns` above already
+    # equals traditional + causal_delta, so blending it against the raw
+    # `mean_returns` is equivalent to scaling the causal delta itself by
+    # CAUSAL_BLEND_RATIO: blended = mean + CAUSAL_BLEND_RATIO * causal_delta.
+    blended_returns = (
+        CAUSAL_BLEND_RATIO * adjusted_returns
+        + (1 - CAUSAL_BLEND_RATIO) * mean_returns
+    )
+
+    causal_weights = _optimize_markowitz(blended_returns, cov_matrix, objective)
+
     return causal_weights, adjustments
 
 
