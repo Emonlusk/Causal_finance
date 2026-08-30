@@ -4,11 +4,12 @@ from app.models.causal_model import CausalModel
 from app.models.scenario import Scenario
 from app.models.activity import Activity
 from app.models.trade import Trade, PortfolioSnapshot
+from app.models.revoked_token import RevokedToken
 from app.models.ml_models import (
-    TrainedModel, 
-    ModelPrediction, 
-    CausalRelationship, 
-    MarketRegime, 
+    TrainedModel,
+    ModelPrediction,
+    CausalRelationship,
+    MarketRegime,
     TrainingJob
 )
 
@@ -20,6 +21,7 @@ __all__ = [
     'Activity',
     'Trade',
     'PortfolioSnapshot',
+    'RevokedToken',
     'TrainedModel',
     'ModelPrediction',
     'CausalRelationship',

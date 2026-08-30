@@ -13,9 +13,6 @@ migrate = Migrate()
 jwt = JWTManager()
 cache = Cache()
 
-# In-memory JWT blocklist (stores revoked token JTIs)
-_jwt_blocklist: set = set()
-
 
 def create_app(config_name='default'):
     """Application factory pattern"""
@@ -61,7 +58,9 @@ def create_app(config_name='default'):
     @jwt.token_in_blocklist_loader
     def check_if_token_revoked(jwt_header, jwt_payload):
         """Check whether a token has been revoked (e.g., after logout)"""
-        return jwt_payload.get('jti') in _jwt_blocklist
+        from app.models.revoked_token import RevokedToken
+        jti = jwt_payload.get('jti')
+        return bool(jti) and RevokedToken.is_revoked(jti)
     
     @jwt.revoked_token_loader
     def revoked_token_callback(jwt_header, jwt_payload):

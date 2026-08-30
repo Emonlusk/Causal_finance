@@ -10,6 +10,7 @@ from datetime import datetime
 from app import db
 from app.models.user import User
 from app.models.activity import Activity
+from app.models.revoked_token import RevokedToken
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -138,11 +139,12 @@ def get_current_user():
 @auth_bp.route('/logout', methods=['POST'])
 @jwt_required()
 def logout():
-    """Logout user — revokes token by adding JTI to blocklist"""
-    from app import _jwt_blocklist
-    jti = get_jwt().get('jti')
-    if jti:
-        _jwt_blocklist.add(jti)
+    """Logout user — revokes token by recording its JTI in revoked_tokens"""
+    claims = get_jwt()
+    jti = claims.get('jti')
+    exp = claims.get('exp')
+    if jti and exp and not RevokedToken.is_revoked(jti):
+        RevokedToken.revoke(jti, datetime.utcfromtimestamp(exp))
     return jsonify({
         'message': 'Logout successful'
     }), 200
