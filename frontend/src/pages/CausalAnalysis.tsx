@@ -460,7 +460,7 @@ const CausalAnalysis = () => {
               <div className="grid md:grid-cols-2 gap-6">
                 <div>
                   <div className="flex items-center gap-3 mb-3">
-                    <div className={`text-3xl font-bold ${regimeInfo.color}`}>
+                    <div className={`stat-number text-3xl font-bold ${regimeInfo.color}`}>
                       {regimeInfo.label}
                     </div>
                   </div>
@@ -571,7 +571,7 @@ const CausalAnalysis = () => {
                     {selectedFactor && factorExplanations[selectedFactor] && (
                       <div className="p-4 rounded-lg bg-muted/50 border">
                         <div className="flex items-start gap-3">
-                          <Info className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
+                          <Info className="w-5 h-5 text-secondary flex-shrink-0 mt-0.5" />
                           <div>
                             <p className="font-medium">{factorExplanations[selectedFactor].name}</p>
                             <p className="text-sm text-muted-foreground mt-1">
@@ -727,7 +727,7 @@ const CausalAnalysis = () => {
                       {whatIfResults.effects && Object.entries(whatIfResults.effects).map(([sector, effect]: [string, any]) => (
                         <div key={sector} className="p-4 rounded-lg border">
                           <p className="font-medium">{sector}</p>
-                          <div className={`text-2xl font-bold mt-1 ${effect.ate > 0 ? 'text-green-500' : 'text-red-500'}`}>
+                          <div className={`stat-number text-2xl font-bold mt-1 ${effect.ate > 0 ? 'text-green-500' : 'text-red-500'}`}>
                             {effect.ate > 0 ? '+' : ''}{(effect.ate * 100).toFixed(1)}%
                           </div>
                           <p className="text-xs text-muted-foreground mt-1">
@@ -790,8 +790,8 @@ const CausalAnalysis = () => {
                 <CardContent className="space-y-4">
                   <div className="space-y-3">
                     <div className="flex gap-3">
-                      <div className="w-8 h-8 rounded-full bg-blue-500/10 flex items-center justify-center flex-shrink-0">
-                        <span className="text-blue-500 font-bold">1</span>
+                      <div className="w-8 h-8 rounded-full bg-secondary/10 flex items-center justify-center flex-shrink-0">
+                        <span className="text-secondary font-bold">1</span>
                       </div>
                       <div>
                         <p className="font-medium">Correlation vs Causation</p>
@@ -802,8 +802,8 @@ const CausalAnalysis = () => {
                       </div>
                     </div>
                     <div className="flex gap-3">
-                      <div className="w-8 h-8 rounded-full bg-blue-500/10 flex items-center justify-center flex-shrink-0">
-                        <span className="text-blue-500 font-bold">2</span>
+                      <div className="w-8 h-8 rounded-full bg-secondary/10 flex items-center justify-center flex-shrink-0">
+                        <span className="text-secondary font-bold">2</span>
                       </div>
                       <div>
                         <p className="font-medium">Sensitivity Analysis</p>
@@ -814,8 +814,8 @@ const CausalAnalysis = () => {
                       </div>
                     </div>
                     <div className="flex gap-3">
-                      <div className="w-8 h-8 rounded-full bg-blue-500/10 flex items-center justify-center flex-shrink-0">
-                        <span className="text-blue-500 font-bold">3</span>
+                      <div className="w-8 h-8 rounded-full bg-secondary/10 flex items-center justify-center flex-shrink-0">
+                        <span className="text-secondary font-bold">3</span>
                       </div>
                       <div>
                         <p className="font-medium">What-If Scenarios</p>
@@ -865,8 +865,8 @@ const CausalAnalysis = () => {
                       </p>
                     </div>
                     <div className="p-4 rounded-lg border">
-                      <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center mb-3">
-                        <Target className="w-5 h-5 text-blue-500" />
+                      <div className="w-10 h-10 rounded-full bg-secondary/10 flex items-center justify-center mb-3">
+                        <Target className="w-5 h-5 text-secondary" />
                       </div>
                       <p className="font-medium">Position for Regimes</p>
                       <p className="text-sm text-muted-foreground mt-1">

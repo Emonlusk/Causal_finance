@@ -382,7 +382,7 @@ class MLTrainingPipeline:
                 'n_nodes': len(dag.get('nodes', [])),
             },
             hyperparameters={'max_lag': 5, 'significance': 0.05},
-            filepath=causal_path,
+            filepath=os.path.basename(causal_path),
             training_data_hash=data_hash
         )
         
@@ -448,7 +448,7 @@ class MLTrainingPipeline:
                 version=version,
                 metrics={'n_effects': len(effects_matrix)},
                 hyperparameters={'method': 'auto'},
-                filepath=treatment_path,
+                filepath=os.path.basename(treatment_path),
                 training_data_hash=data_hash
             )
             
@@ -527,7 +527,7 @@ class MLTrainingPipeline:
             version=version,
             metrics=fit_result.get('regime_stats', {}),
             hyperparameters={'n_regimes': 4},
-            filepath=regime_path,
+            filepath=os.path.basename(regime_path),
             training_data_hash=data_hash
         )
         
@@ -585,21 +585,10 @@ class PredictionService:
         if not model_info or 'filepath' not in model_info:
             return None
         
-        filepath = model_info['filepath']
-        
-        # Resolve path: try as-is, then MODELS_DIR/filepath, then MODELS_DIR/basename
-        if not os.path.exists(filepath):
-            candidates = [
-                os.path.join(MODELS_DIR, filepath),
-                os.path.join(MODELS_DIR, os.path.basename(filepath)),
-            ]
-            resolved = next((c for c in candidates if os.path.exists(c)), None)
-            if resolved:
-                filepath = resolved
-            else:
-                logger.warning(f"Model file not found: {filepath} (tried: {candidates})")
-                return None
-        
+        filepath = self._resolve_model_path(model_info['filepath'])
+        if filepath is None:
+            return None
+
         try:
             model = joblib.load(filepath)
             self._loaded_models[model_type] = model
@@ -607,6 +596,30 @@ class PredictionService:
         except Exception as e:
             logger.error(f"Failed to load model {model_type}: {e}")
             return None
+
+    @staticmethod
+    def _resolve_model_path(stored_filepath: str) -> Optional[str]:
+        """Resolve a registry filepath to a file that exists on this machine.
+
+        All models are registered as direct children of MODELS_DIR (see the
+        `register_model(..., filepath=...)` call sites in this file, which
+        always store `os.path.basename(...)`), so MODELS_DIR/basename is the
+        primary, expected lookup - not a fallback. The stored value is tried
+        second only to support a legitimate absolute path that doesn't live
+        in MODELS_DIR; older registry entries may still carry a stale
+        absolute path baked in on a different machine (before filepaths were
+        normalized to basenames), which MODELS_DIR/basename resolves anyway
+        since the filename is unaffected by which machine trained it.
+        """
+        primary = os.path.join(MODELS_DIR, os.path.basename(stored_filepath))
+        if os.path.exists(primary):
+            return primary
+        if os.path.exists(stored_filepath):
+            return stored_filepath
+        logger.warning(
+            f"Model file not found: {stored_filepath} (tried: {primary}, {stored_filepath})"
+        )
+        return None
     
     def predict_sector_returns(
         self,
@@ -707,18 +720,10 @@ class PredictionService:
             Dictionary with regime prediction
         """
         model_info = self.registry.get_active_model('regime')
-        
+
         if model_info:
-            filepath = model_info.get('filepath', '')
-            # Resolve path: try as-is, then MODELS_DIR/filepath, then MODELS_DIR/basename
-            if not os.path.exists(filepath):
-                candidates = [
-                    os.path.join(MODELS_DIR, filepath),
-                    os.path.join(MODELS_DIR, os.path.basename(filepath)),
-                ]
-                filepath = next((c for c in candidates if os.path.exists(c)), filepath)
-            
-            if os.path.exists(filepath):
+            filepath = self._resolve_model_path(model_info.get('filepath', ''))
+            if filepath:
                 detector = MarketRegimeDetector()
                 detector.load(filepath)
                 return detector.predict_regime(recent_returns, recent_volatility)

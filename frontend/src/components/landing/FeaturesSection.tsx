@@ -1,13 +1,13 @@
 import { FeatureCard } from "./FeatureCard";
 import { MiniDAG } from "./MiniDAG";
 import { MiniBarChart } from "./MiniBarChart";
-import { 
-  Search, 
-  Scale, 
-  SlidersHorizontal, 
-  Activity, 
-  FileText, 
-  Link2 
+import {
+  Search,
+  Scale,
+  SlidersHorizontal,
+  Activity,
+  FileText,
+  Wallet
 } from "lucide-react";
 
 const features = [
@@ -30,7 +30,7 @@ const features = [
     visual: (
       <div className="flex items-center gap-2">
         <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
-          <div className="h-full w-2/3 bg-gradient-to-r from-primary to-accent rounded-full" />
+          <div className="h-full w-2/3 bg-gradient-to-r from-accent to-secondary rounded-full" />
         </div>
         <span className="text-xs font-medium text-accent">-0.8%</span>
       </div>
@@ -59,8 +59,8 @@ const features = [
   },
   {
     icon: FileText,
-    title: "Research Backed",
-    description: "Published causal inference techniques. Our methodology is grounded in peer-reviewed academic research.",
+    title: "Research-Grade Methods",
+    description: "Built on established causal inference techniques - Granger causality, the PC algorithm, DoWhy, and EconML's double machine learning - not black-box heuristics.",
     visual: (
       <div className="flex items-center gap-2">
         <div className="w-8 h-10 bg-muted rounded flex items-center justify-center">
@@ -74,19 +74,19 @@ const features = [
     ),
   },
   {
-    icon: Link2,
-    title: "Easy Integration",
-    description: "Seamless implementation of insights. Export your optimized portfolio directly to your brokerage.",
+    icon: Wallet,
+    title: "Paper Trading",
+    description: "Practice with a simulated brokerage account - real-time quotes, real fills and P&L, zero real money at risk.",
     visual: (
-      <div className="flex items-center justify-center gap-3">
-        {["S", "F", "V", "TD"].map((logo) => (
-          <div
-            key={logo}
-            className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center text-xs font-bold text-muted-foreground"
-          >
-            {logo}
-          </div>
-        ))}
+      <div className="flex items-center gap-4 text-xs">
+        <div className="flex items-center gap-1">
+          <span className="text-muted-foreground">Cash</span>
+          <span className="font-semibold text-foreground">$10,000</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="text-muted-foreground">P&L</span>
+          <span className="font-semibold text-success">+$142</span>
+        </div>
       </div>
     ),
   },
@@ -94,7 +94,7 @@ const features = [
 
 export function FeaturesSection() {
   return (
-    <section className="py-24 bg-background">
+    <section id="features" className="py-24 bg-background scroll-mt-20">
       <div className="container mx-auto px-6">
         {/* Header */}
         <div className="text-center max-w-3xl mx-auto mb-16">

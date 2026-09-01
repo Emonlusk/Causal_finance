@@ -30,7 +30,7 @@
           "max_lag": 5,
           "significance": 0.05
         },
-        "filepath": "C:\\Kartik\\Hard_coding\\Causal_finance\\backend\\data\\models\\causal_discovery_20260706_020545.pkl",
+        "filepath": "causal_discovery_20260706_020545.pkl",
         "training_data_hash": "f09ac7d60032",
         "created_at": "2026-07-06T02:06:41.583974",
         "is_active": true
@@ -45,6 +45,7 @@
         "metrics": {
           "n_effects": 143,
           "n_significant": 67,
+          "n_significant_note": "Uncorrected (raw p<0.05), no multiple-testing correction applied at training time. Cannot be retroactively FDR-corrected: per-pair p-values from this training run were not persisted, only this summary count. For a corrected count, see results/phase2_ate_results.csv's significant_fdr column (a separate, smaller evaluation run - 1/25 significant after Benjamini-Hochberg FDR correction, vs 7/25 raw).",
           "methods_used": [
             "ols"
           ]
@@ -64,7 +65,7 @@
         "hyperparameters": {
           "method": "auto"
         },
-        "filepath": "C:\\Kartik\\Hard_coding\\Causal_finance\\backend\\data\\models\\treatment_effects_20260706_020545.pkl",
+        "filepath": "treatment_effects_20260706_020545.pkl",
         "training_data_hash": "f09ac7d60032",
         "created_at": "2026-07-06T02:07:11.466148",
         "is_active": false
@@ -78,7 +79,7 @@
         "hyperparameters": {
           "method": "auto"
         },
-        "filepath": "C:\\Kartik\\Hard_coding\\Causal_finance\\backend\\data\\models\\treatment_effects_20260706_021047.pkl",
+        "filepath": "treatment_effects_20260706_021047.pkl",
         "training_data_hash": "f09ac7d60032",
         "created_at": "2026-07-06T02:16:24.361172",
         "is_active": true
@@ -750,7 +751,7 @@
         "hyperparameters": {
           "n_regimes": 3
         },
-        "filepath": "C:\\Kartik\\Hard_coding\\Causal_finance\\backend\\data\\models\\regime_detector_20260705_202604.pkl",
+        "filepath": "regime_detector_20260705_202604.pkl",
         "training_data_hash": null,
         "created_at": "2026-07-06T01:56:04.937236",
         "is_active": true

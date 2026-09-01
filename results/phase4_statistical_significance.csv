@@ -1,11 +1,11 @@
 Test,Statistic,p-value,Significance
-Paired t-test: Causal vs Equal Weight,-0.7187,0.478284,ns
-Paired t-test: Causal vs Markowitz MPT,1.0044,0.323512,ns
-Paired t-test: Causal vs S&P 500 (SPY),-0.7643,0.451099,ns
-Mann-Whitney: Causal vs Equal Weight,446.0,0.436755,ns
-Mann-Whitney: Causal vs Markowitz MPT,455.0,0.473476,ns
-Mann-Whitney: Causal vs S&P 500 (SPY),433.0,0.515118,ns
-Bootstrap Sharpe: Causal,0.0092,"[-1.2383, 1.3826]",95% CI
+Paired t-test: Causal vs Equal Weight,-0.9383,0.356095,ns
+Paired t-test: Causal vs Markowitz MPT,-1.133,0.26651,ns
+Paired t-test: Causal vs S&P 500 (SPY),-1.0222,0.315415,ns
+Mann-Whitney: Causal vs Equal Weight,442.0,0.460747,ns
+Mann-Whitney: Causal vs Markowitz MPT,442.5,0.547079,ns
+Mann-Whitney: Causal vs S&P 500 (SPY),425.0,0.563245,ns
+Bootstrap Sharpe: Causal,-0.0534,"[-1.2962, 1.3077]",95% CI
 Bootstrap Sharpe: Equal Weight,0.0863,"[-1.2282, 1.4399]",95% CI
 Bootstrap Sharpe: Markowitz MPT,-0.0221,"[-1.2666, 1.3456]",95% CI
 Bootstrap Sharpe: S&P 500 (SPY),0.1189,"[-1.1654, 1.5246]",95% CI

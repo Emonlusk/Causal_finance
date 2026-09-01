@@ -42,8 +42,8 @@ const Login = () => {
       <Card className="w-full max-w-md relative z-10 shadow-xl">
         <CardHeader className="text-center space-y-4">
           <Link to="/" className="flex items-center justify-center gap-2">
-            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary to-primary/80 flex items-center justify-center shadow-lg">
-              <TrendingUp className="w-7 h-7 text-primary-foreground" />
+            <div className="w-12 h-12 rounded-xl bg-accent flex items-center justify-center shadow-lg">
+              <TrendingUp className="w-7 h-7 text-accent-foreground" />
             </div>
           </Link>
           <div>

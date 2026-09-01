@@ -1,0 +1,31 @@
+{
+  "n_variables": 11,
+  "n_samples": 6018,
+  "variables": [
+    "Communication_Services_Return_1d",
+    "Consumer_Discretionary_Return_1d",
+    "Consumer_Staples_Return_1d",
+    "Energy_Return_1d",
+    "Financials_Return_1d",
+    "Healthcare_Return_1d",
+    "Industrials_Return_1d",
+    "Materials_Return_1d",
+    "Real_Estate_Return_1d",
+    "Technology_Return_1d",
+    "Utilities_Return_1d"
+  ],
+  "pearsonr": {
+    "ci_test": "pearsonr",
+    "elapsed_seconds": 20.33,
+    "n_edges": 23,
+    "method": "pc_algorithm"
+  },
+  "chi_square": {
+    "ci_test": "chi_square",
+    "elapsed_seconds": null,
+    "timed_out": true,
+    "timeout_seconds": 180,
+    "note": "Did not complete within 180s and was forcibly terminated. This is evidence in itself: the original \"several minutes\" characterization in paper.tex Section 4.1 understates rather than overstates this regression - on this machine, with 11 continuous variables, the old chi_square default did not finish within 180s at all."
+  },
+  "speedup_factor_lower_bound": 8.85
+}

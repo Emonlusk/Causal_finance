@@ -21,35 +21,48 @@ import os
 import logging
 import numpy as np
 import pandas as pd
+from statsmodels.stats.multitest import multipletests
 from typing import Dict, List, Any, Optional
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 logger = logging.getLogger(__name__)
 
-# Treatment-Outcome pairs for the paper
-TREATMENTS = ['Fed_Funds_Rate_Change', 'CPI_Change', 'Treasury_10Y_Yield_Change',
-              'Oil_WTI_Change', 'VIX_Change']
+# Full 7-treatment x 11-sector grid, matching the macro_treatments list in
+# ml_training_pipeline.py and the full sector universe in data_pipeline.py's
+# SECTOR_ETF_MAP. (An earlier version of this script hardcoded a 5x5 subset,
+# missing GDP_Change/Unemployment_Rate_Change and 6 of the 11 sectors, which
+# silently reported only 25 of the 77 pairs described in the paper's
+# methodology section - see research_paper/claims_to_evidence.md.)
+TREATMENTS = ['Fed_Funds_Rate_Change', 'CPI_Change', 'GDP_Change',
+              'Oil_WTI_Change', 'Treasury_10Y_Yield_Change',
+              'Unemployment_Rate_Change', 'VIX_Change']
 
 OUTCOMES = ['Technology_Return_1d', 'Healthcare_Return_1d', 'Energy_Return_1d',
-            'Financials_Return_1d', 'Industrials_Return_1d']
+            'Financials_Return_1d', 'Industrials_Return_1d',
+            'Consumer_Discretionary_Return_1d', 'Consumer_Staples_Return_1d',
+            'Utilities_Return_1d', 'Materials_Return_1d', 'Real_Estate_Return_1d',
+            'Communication_Services_Return_1d']
 
 CONFOUNDERS = ['SP500_Return', 'SP500_Volatility_21d']
 
 
 def run_causal_evaluation(
     train_end_date: str = '2021-04-30',
-    max_pairs: int = 25
+    max_pairs: int = len(TREATMENTS) * len(OUTCOMES)
 ) -> pd.DataFrame:
     """
     Run full causal model evaluation (Phase 2).
-    
+
     Args:
         train_end_date: Use only training data up to this date
-        max_pairs: Maximum treatment-outcome pairs to evaluate
-    
+        max_pairs: Maximum treatment-outcome pairs to evaluate (defaults to
+            the full TREATMENTS x OUTCOMES grid, i.e. no truncation)
+
     Returns:
-        DataFrame with ATE results for all treatment-outcome pairs
+        DataFrame with ATE results for all treatment-outcome pairs, plus
+        Benjamini-Hochberg FDR-corrected significance columns
+        (significant_raw, p_value_fdr, significant_fdr)
     """
     from app.services.data_pipeline import get_pipeline
     from app.services.treatment_effects import TreatmentEffectEstimator
@@ -164,27 +177,37 @@ def run_causal_evaluation(
                 pair_count += 1
     
     df = pd.DataFrame(results)
-    
+
+    # Benjamini-Hochberg FDR correction across every tested pair, computed
+    # here (not as a post-hoc manual edit) so the saved CSV is reproducible
+    # end-to-end from a single call to this function.
+    df['significant_raw'] = False
+    df['p_value_fdr'] = np.nan
+    df['significant_fdr'] = False
+    if 'p_value' in df.columns:
+        valid_mask = df['p_value'].notna()
+        if valid_mask.any():
+            df.loc[valid_mask, 'significant_raw'] = df.loc[valid_mask, 'p_value'] < 0.05
+            reject, p_fdr, _, _ = multipletests(
+                df.loc[valid_mask, 'p_value'].values, alpha=0.05, method='fdr_bh'
+            )
+            df.loc[valid_mask, 'p_value_fdr'] = p_fdr
+            df.loc[valid_mask, 'significant_fdr'] = reject
+
     # Summary statistics
     print(f"\n{'=' * 60}")
     print("CAUSAL EVALUATION SUMMARY")
     print(f"{'=' * 60}")
     print(f"Total pairs evaluated: {len(df)}")
-    
-    if 'p_value' in df.columns:
-        significant = df[df['p_value'].notna() & (df['p_value'] < 0.05)]
-    else:
-        # Every pair errored out (e.g. no valid data for any treatment/
-        # outcome pair) - nothing to summarize, but don't crash the run over it.
-        logger.warning("No pair produced a p_value - all estimations failed")
-        significant = pd.DataFrame()
-    print(f"Statistically significant (p < 0.05): {len(significant)}")
-    
+    print(f"Statistically significant, uncorrected (p < 0.05): {int(df['significant_raw'].sum())}")
+    print(f"Statistically significant, BH-FDR corrected: {int(df['significant_fdr'].sum())}")
+
+    significant = df[df['significant_raw']] if 'significant_raw' in df.columns else pd.DataFrame()
     if len(significant) > 0:
-        print("\nSignificant causal relationships:")
+        print("\nSignificant causal relationships (uncorrected):")
         for _, row in significant.iterrows():
             print(f"  {row['treatment']} -> {row['outcome']}: ATE={row['ate']:.6f}, p={row['p_value']:.6f}")
-    
+
     return df
 
 

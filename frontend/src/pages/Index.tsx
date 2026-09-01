@@ -2,7 +2,7 @@ import { Navbar } from "@/components/landing/Navbar";
 import { HeroSection } from "@/components/landing/HeroSection";
 import { FeaturesSection } from "@/components/landing/FeaturesSection";
 import { InteractiveDemo } from "@/components/landing/InteractiveDemo";
-import { SocialProof } from "@/components/landing/SocialProof";
+import { VerifiedResults } from "@/components/landing/VerifiedResults";
 import { CTASection } from "@/components/landing/CTASection";
 import { Footer } from "@/components/landing/Footer";
 
@@ -13,7 +13,7 @@ const Index = () => {
       <HeroSection />
       <FeaturesSection />
       <InteractiveDemo />
-      <SocialProof />
+      <VerifiedResults />
       <CTASection />
       <Footer />
     </div>

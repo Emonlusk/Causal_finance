@@ -1,0 +1,3 @@
+Portfolio,window,n_folds,annualized_return,annualized_volatility,sharpe_ratio,max_drawdown
+Causal-Blended (point-in-time),2023-03-08 to 2024-01-01,3,12.3142,12.0889,0.6878,-9.032
+Plain Markowitz,2023-03-08 to 2024-01-01,3,12.1632,12.2458,0.6666,-9.032

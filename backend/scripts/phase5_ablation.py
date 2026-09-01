@@ -44,12 +44,13 @@ def _no_cate_weight_fn(train_returns: pd.DataFrame, as_of_date: str, cols: List[
     was the training window itself, not this forecast.
     """
     from app.services.portfolio_service import _optimize_markowitz
-    from app.services.causal_service import get_active_sensitivity_matrix
+    from app.services.treatment_effects import get_sensitivity_matrix_as_of
+    from app.services.causal_service import DEFAULT_SECTOR_SENSITIVITY
 
     mean_ret = train_returns.mean().values * 252
     cov_mat = train_returns.cov().values * 252
 
-    active_matrix = get_active_sensitivity_matrix()
+    active_matrix = get_sensitivity_matrix_as_of(as_of_date) or DEFAULT_SECTOR_SENSITIVITY
     all_factors = set()
     for sector_sens in active_matrix.values():
         all_factors.update(sector_sens.keys())
@@ -75,12 +76,13 @@ def _alt_treatment_weight_fn(train_returns: pd.DataFrame, as_of_date: str, cols:
     hypothetical VIX move, per-sector. Fixed forecast, not live data.
     """
     from app.services.portfolio_service import _optimize_markowitz, SECTOR_ETFS
-    from app.services.causal_service import get_active_sensitivity_matrix
+    from app.services.treatment_effects import get_sensitivity_matrix_as_of
+    from app.services.causal_service import DEFAULT_SECTOR_SENSITIVITY
 
     mean_ret = train_returns.mean().values * 252
     cov_mat = train_returns.cov().values * 252
 
-    active_matrix = get_active_sensitivity_matrix()
+    active_matrix = get_sensitivity_matrix_as_of(as_of_date) or DEFAULT_SECTOR_SENSITIVITY
     economic_forecast = {
         'interest_rates': 0.0, 'inflation': 0.0, 'gdp_growth': 0.0,
         'oil_price': 0.0, 'vix': 0.01,

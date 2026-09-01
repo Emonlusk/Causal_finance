@@ -43,10 +43,16 @@ export function Navbar() {
   const navLinks = [
     { label: "Features", href: "#features" },
     { label: "Demo", href: "#demo" },
+    { label: "Results", href: "#results" },
     { label: "Dashboard", href: "/dashboard" },
-    { label: "Research", href: "/research" },
   ];
 
+  // The unscrolled state floats over the hero's fixed near-black gradient
+  // (--gradient-hero, identical in light/dark mode - see index.css), so its
+  // text uses the --sidebar-* tokens: those are the theme-invariant
+  // near-white-on-dark chrome colors, not --primary-foreground (which
+  // deliberately flips between light/dark mode for button contrast and
+  // would go invisible against the dark hero in dark mode).
   return (
     <nav
       className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
@@ -55,14 +61,12 @@ export function Navbar() {
           : "bg-transparent"
       }`}
     >
-      <div className="container mx-auto px-6">
+      <div className="w-full px-8">
         <div className="flex items-center justify-between h-16 md:h-20">
-          {/* Logo */}
+          {/* Logo - always the brand yellow mark, regardless of scroll/theme */}
           <Link to="/" className="flex items-center gap-2">
-            <div className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
-              isScrolled ? "bg-primary" : "bg-primary-foreground/20"
-            }`}>
-              <svg viewBox="0 0 24 24" className={`w-5 h-5 ${isScrolled ? "text-primary-foreground" : "text-primary-foreground"}`}>
+            <div className="w-8 h-8 rounded-lg bg-accent flex items-center justify-center flex-shrink-0">
+              <svg viewBox="0 0 24 24" className="w-5 h-5 text-accent-foreground">
                 <circle cx="6" cy="12" r="3" fill="currentColor" />
                 <circle cx="18" cy="6" r="3" fill="currentColor" />
                 <circle cx="18" cy="18" r="3" fill="currentColor" />
@@ -70,8 +74,8 @@ export function Navbar() {
                 <line x1="9" y1="12" x2="15" y2="17" stroke="currentColor" strokeWidth="2" />
               </svg>
             </div>
-            <span className={`font-bold text-lg transition-colors ${
-              isScrolled ? "text-foreground" : "text-primary-foreground"
+            <span className={`font-heading font-bold text-lg tracking-tight transition-colors ${
+              isScrolled ? "text-foreground" : "text-sidebar-foreground"
             }`}>
               CausalAI
             </span>
@@ -83,8 +87,8 @@ export function Navbar() {
               <a
                 key={link.label}
                 href={link.href}
-                className={`text-sm font-medium transition-colors hover:opacity-80 ${
-                  isScrolled ? "text-muted-foreground hover:text-foreground" : "text-primary-foreground/80 hover:text-primary-foreground"
+                className={`label-brand text-xs font-semibold transition-colors hover:opacity-80 ${
+                  isScrolled ? "text-muted-foreground hover:text-foreground" : "text-sidebar-foreground/70 hover:text-sidebar-foreground"
                 }`}
               >
                 {link.label}
@@ -99,9 +103,9 @@ export function Navbar() {
                 <Link to="/dashboard">
                   <Button
                     variant="ghost"
-                    className={`font-medium ${
-                      isScrolled ? "text-foreground hover:bg-secondary" : "text-primary-foreground hover:bg-primary-foreground/10"
-                    }`}
+                    className={
+                      isScrolled ? "" : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
+                    }
                   >
                     Dashboard
                   </Button>
@@ -110,7 +114,7 @@ export function Navbar() {
                   <DropdownMenuTrigger asChild>
                     <Button variant="ghost" className="relative h-9 w-9 rounded-full">
                       <Avatar className="h-9 w-9">
-                        <AvatarFallback className={isScrolled ? "bg-primary text-primary-foreground" : "bg-primary-foreground text-primary"}>
+                        <AvatarFallback className="bg-accent text-accent-foreground">
                           {getInitials(user.name || user.email)}
                         </AvatarFallback>
                       </Avatar>
@@ -141,21 +145,16 @@ export function Navbar() {
                 <Link to="/login">
                   <Button
                     variant="ghost"
-                    className={`font-medium ${
-                      isScrolled ? "text-foreground hover:bg-secondary" : "text-primary-foreground hover:bg-primary-foreground/10"
-                    }`}
+                    className={
+                      isScrolled ? "" : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
+                    }
                   >
                     Log In
                   </Button>
                 </Link>
                 <Link to="/register">
-                  <Button
-                    className={`font-semibold ${
-                      isScrolled
-                        ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                        : "bg-primary-foreground text-primary hover:bg-primary-foreground/90"
-                    }`}
-                  >
+                  {/* The one primary action in the nav - always the accent yellow */}
+                  <Button variant="accent">
                     Get Started
                   </Button>
                 </Link>
@@ -169,9 +168,9 @@ export function Navbar() {
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
           >
             {isMobileMenuOpen ? (
-              <X className={`w-6 h-6 ${isScrolled ? "text-foreground" : "text-primary-foreground"}`} />
+              <X className={`w-6 h-6 ${isScrolled ? "text-foreground" : "text-sidebar-foreground"}`} />
             ) : (
-              <Menu className={`w-6 h-6 ${isScrolled ? "text-foreground" : "text-primary-foreground"}`} />
+              <Menu className={`w-6 h-6 ${isScrolled ? "text-foreground" : "text-sidebar-foreground"}`} />
             )}
           </button>
         </div>
@@ -184,8 +183,8 @@ export function Navbar() {
                 <a
                   key={link.label}
                   href={link.href}
-                  className={`text-sm font-medium ${
-                    isScrolled ? "text-foreground" : "text-primary-foreground"
+                  className={`label-brand text-xs font-semibold ${
+                    isScrolled ? "text-foreground" : "text-sidebar-foreground"
                   }`}
                   onClick={() => setIsMobileMenuOpen(false)}
                 >
@@ -197,7 +196,7 @@ export function Navbar() {
                   <>
                     <div className="flex items-center gap-2 px-2 py-1">
                       <Avatar className="h-8 w-8">
-                        <AvatarFallback className="bg-primary text-primary-foreground text-xs">
+                        <AvatarFallback className="bg-accent text-accent-foreground text-xs">
                           {getInitials(user.name || user.email)}
                         </AvatarFallback>
                       </Avatar>
@@ -211,8 +210,8 @@ export function Navbar() {
                         Dashboard
                       </Button>
                     </Link>
-                    <Button 
-                      variant="destructive" 
+                    <Button
+                      variant="destructive"
                       className="w-full"
                       onClick={() => {
                         handleLogout();
@@ -230,7 +229,7 @@ export function Navbar() {
                       </Button>
                     </Link>
                     <Link to="/register" onClick={() => setIsMobileMenuOpen(false)}>
-                      <Button className="w-full bg-primary text-primary-foreground">
+                      <Button variant="accent" className="w-full">
                         Get Started
                       </Button>
                     </Link>

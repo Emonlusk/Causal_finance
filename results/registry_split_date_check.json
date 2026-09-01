@@ -1,0 +1,11 @@
+{
+  "n_rows": 6018,
+  "train_test_split": 0.2,
+  "split_idx": 4814,
+  "split_date": "2023-03-07",
+  "first_test_date": "2023-03-08",
+  "train_start_date": "2010-01-01",
+  "test_end_date": "2026-07-02",
+  "n_train_rows": 4814,
+  "n_test_rows": 1204
+}

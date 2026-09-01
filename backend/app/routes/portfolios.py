@@ -171,8 +171,9 @@ def get_portfolio_performance(portfolio_id):
     # Get time range from query params
     period = request.args.get('period', '1Y')  # 1M, 3M, 1Y, ALL
     
-    # This would use real market data service in production
-    # For now, return structured mock data
+    # Computes real returns/Sharpe/drawdown from price_store history; degrades
+    # to zeroed metrics + an 'error' field (not fabricated numbers) if price
+    # data for this portfolio's assets is unavailable.
     from app.services.portfolio_service import calculate_portfolio_performance
     performance_data = calculate_portfolio_performance(portfolio, period)
     

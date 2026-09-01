@@ -1,150 +1,134 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Causal AI Portfolio Optimizer Design System
-   Primary: Deep Blue (#2563EB) | Accent: Teal (#0D9488)
-   Font: Inter | All colors in HSL
+/* Causal Finance Design System
+   Brand black #0D0D0D | Primary accent (mustard) #F5C518 | Secondary accent
+   (orange) #F2622E | Off-white canvas #F7F7F5
+   Headings/nav/stats: Space Grotesk | Body/labels/tables: Inter
+   All colors in HSL. Nav/sidebar chrome (the --sidebar-* tokens) is
+   deliberately identical between :root and .dark - it's a fixed brand
+   surface that stays near-black regardless of light/dark mode.
+   Financial sign coding (gains/losses, ATE sign, Sharpe sign) uses
+   --success / --destructive, or literal Tailwind "green-500" / "red-500"
+   style classes elsewhere in the app - never --primary/--secondary/--accent.
+   Keep it that way: the brand palette is for chrome and emphasis, not for
+   encoding whether a number is good or bad.
 */
 
 @layer base {
   :root {
-    /* Primary - Deep Blue */
-    --primary: 217 91% 60%;
-    --primary-foreground: 210 40% 98%;
-    
-    /* Accent - Teal */
-    --accent: 168 76% 32%;
-    --accent-foreground: 210 40% 98%;
-    
-    /* Background & Foreground */
-    --background: 210 40% 98%;
-    --foreground: 215 28% 17%;
-    
-    /* Cards */
+    --background: 60 11% 96%;
+    --foreground: 0 0% 5%;
+
     --card: 0 0% 100%;
-    --card-foreground: 215 28% 17%;
-    
-    /* Popover */
+    --card-foreground: 0 0% 5%;
+
     --popover: 0 0% 100%;
-    --popover-foreground: 215 28% 17%;
-    
-    /* Secondary */
-    --secondary: 210 40% 96%;
-    --secondary-foreground: 215 28% 17%;
-    
-    /* Muted */
-    --muted: 210 40% 96%;
-    --muted-foreground: 215 16% 47%;
-    
-    /* Destructive */
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 210 40% 98%;
-    
-    /* Success */
-    --success: 142 76% 36%;
-    --success-foreground: 210 40% 98%;
-    
-    /* Warning */
+    --popover-foreground: 0 0% 5%;
+
+    /* High-contrast black/white pill buttons are the default action style */
+    --primary: 0 0% 5%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Orange - secondary CTAs, badges, notification dots */
+    --secondary: 16 88% 56%;
+    --secondary-foreground: 0 0% 100%;
+
+    /* Mustard yellow - hover highlights, active nav state, the one hero
+       CTA per screen (Button variant="accent"), focus rings */
+    --accent: 47 92% 53%;
+    --accent-foreground: 0 0% 5%;
+
+    --muted: 0 0% 85%;
+    --muted-foreground: 0 0% 38%;
+
+    /* Standard red/green - kept independent of the brand palette on purpose */
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 142 71% 35%;
+    --success-foreground: 0 0% 100%;
     --warning: 38 92% 50%;
-    --warning-foreground: 215 28% 17%;
-    
-    /* Border & Input */
-    --border: 214 32% 91%;
-    --input: 214 32% 91%;
-    --ring: 217 91% 60%;
-    
-    --radius: 0.75rem;
-    
-    /* Sidebar */
-    --sidebar-background: 215 28% 17%;
-    --sidebar-foreground: 210 40% 98%;
-    --sidebar-primary: 217 91% 60%;
-    --sidebar-primary-foreground: 210 40% 98%;
-    --sidebar-accent: 215 25% 27%;
-    --sidebar-accent-foreground: 210 40% 98%;
-    --sidebar-border: 215 25% 27%;
-    --sidebar-ring: 217 91% 60%;
-    
-    /* Custom - Gradients */
-    --gradient-primary: linear-gradient(135deg, hsl(217 91% 60%) 0%, hsl(168 76% 32%) 100%);
-    --gradient-hero: linear-gradient(135deg, hsl(217 91% 50%) 0%, hsl(217 91% 40%) 50%, hsl(168 76% 32%) 100%);
-    --gradient-card: linear-gradient(180deg, hsl(0 0% 100%) 0%, hsl(210 40% 98%) 100%);
-    
-    /* Custom - Shadows */
-    --shadow-sm: 0 1px 2px 0 hsl(215 28% 17% / 0.05);
-    --shadow-md: 0 4px 6px -1px hsl(215 28% 17% / 0.1), 0 2px 4px -2px hsl(215 28% 17% / 0.1);
-    --shadow-lg: 0 10px 15px -3px hsl(215 28% 17% / 0.1), 0 4px 6px -4px hsl(215 28% 17% / 0.1);
-    --shadow-glow: 0 0 40px hsl(217 91% 60% / 0.3);
-    --shadow-card: 0 4px 20px -4px hsl(215 28% 17% / 0.08);
+    --warning-foreground: 0 0% 5%;
+
+    --border: 0 0% 92%;
+    --input: 0 0% 92%;
+    --ring: 47 92% 53%;
+
+    --radius: 1rem;
+
+    /* Sidebar/nav chrome - fixed dark brand surface, same in light & dark */
+    --sidebar-background: 0 0% 6%;
+    --sidebar-foreground: 0 0% 96%;
+    --sidebar-primary: 47 92% 53%;
+    --sidebar-primary-foreground: 0 0% 5%;
+    --sidebar-accent: 0 0% 14%;
+    --sidebar-accent-foreground: 0 0% 96%;
+    --sidebar-border: 0 0% 16%;
+    --sidebar-ring: 47 92% 53%;
+
+    --gradient-primary: linear-gradient(135deg, hsl(47 92% 53%) 0%, hsl(16 88% 56%) 100%);
+    --gradient-hero: linear-gradient(135deg, hsl(0 0% 4%) 0%, hsl(0 0% 9%) 55%, hsl(16 40% 12%) 100%);
+    --gradient-card: linear-gradient(180deg, hsl(0 0% 100%) 0%, hsl(60 11% 97%) 100%);
+
+    --shadow-sm: 0 1px 2px 0 hsl(0 0% 0% / 0.05);
+    --shadow-md: 0 4px 6px -1px hsl(0 0% 0% / 0.08), 0 2px 4px -2px hsl(0 0% 0% / 0.06);
+    --shadow-lg: 0 10px 25px -5px hsl(0 0% 0% / 0.12), 0 4px 10px -4px hsl(0 0% 0% / 0.08);
+    --shadow-glow: 0 0 40px hsl(47 92% 53% / 0.35);
+    --shadow-card: 0 2px 12px -2px hsl(0 0% 0% / 0.06);
   }
 
   .dark {
-    /* Primary - Brighter Blue for dark mode */
-    --primary: 217 91% 65%;
-    --primary-foreground: 215 28% 10%;
-    
-    /* Accent - Brighter Teal */
-    --accent: 168 76% 42%;
-    --accent-foreground: 215 28% 10%;
-    
-    /* Background & Foreground */
-    --background: 215 28% 10%;
-    --foreground: 210 40% 98%;
-    
-    /* Cards */
-    --card: 215 28% 13%;
-    --card-foreground: 210 40% 98%;
-    
-    /* Popover */
-    --popover: 215 28% 13%;
-    --popover-foreground: 210 40% 98%;
-    
-    /* Secondary */
-    --secondary: 215 25% 20%;
-    --secondary-foreground: 210 40% 98%;
-    
-    /* Muted */
-    --muted: 215 25% 20%;
-    --muted-foreground: 215 20% 65%;
-    
-    /* Destructive */
-    --destructive: 0 63% 31%;
-    --destructive-foreground: 210 40% 98%;
-    
-    /* Success */
-    --success: 142 76% 42%;
-    --success-foreground: 215 28% 10%;
-    
-    /* Warning */
+    --background: 0 0% 5%;
+    --foreground: 0 0% 96%;
+
+    --card: 0 0% 9%;
+    --card-foreground: 0 0% 96%;
+
+    --popover: 0 0% 9%;
+    --popover-foreground: 0 0% 96%;
+
+    --primary: 0 0% 96%;
+    --primary-foreground: 0 0% 5%;
+
+    --secondary: 16 88% 58%;
+    --secondary-foreground: 0 0% 100%;
+
+    --accent: 47 92% 58%;
+    --accent-foreground: 0 0% 5%;
+
+    --muted: 0 0% 16%;
+    --muted-foreground: 0 0% 65%;
+
+    --destructive: 0 72% 58%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 142 65% 45%;
+    --success-foreground: 0 0% 5%;
     --warning: 38 92% 55%;
-    --warning-foreground: 215 28% 10%;
-    
-    /* Border & Input */
-    --border: 215 25% 20%;
-    --input: 215 25% 20%;
-    --ring: 217 91% 65%;
-    
-    /* Sidebar */
-    --sidebar-background: 215 28% 8%;
-    --sidebar-foreground: 210 40% 98%;
-    --sidebar-primary: 217 91% 65%;
-    --sidebar-primary-foreground: 210 40% 98%;
-    --sidebar-accent: 215 25% 15%;
-    --sidebar-accent-foreground: 210 40% 98%;
-    --sidebar-border: 215 25% 15%;
-    --sidebar-ring: 217 91% 65%;
-    
-    /* Custom - Gradients */
-    --gradient-primary: linear-gradient(135deg, hsl(217 91% 65%) 0%, hsl(168 76% 42%) 100%);
-    --gradient-hero: linear-gradient(135deg, hsl(215 28% 10%) 0%, hsl(217 91% 20%) 50%, hsl(168 76% 20%) 100%);
-    --gradient-card: linear-gradient(180deg, hsl(215 28% 13%) 0%, hsl(215 28% 10%) 100%);
-    
-    /* Custom - Shadows */
-    --shadow-glow: 0 0 40px hsl(217 91% 65% / 0.2);
-    --shadow-card: 0 4px 20px -4px hsl(0 0% 0% / 0.3);
+    --warning-foreground: 0 0% 5%;
+
+    --border: 0 0% 15%;
+    --input: 0 0% 15%;
+    --ring: 47 92% 58%;
+
+    /* Same fixed dark chrome as :root - deliberately not restated darker */
+    --sidebar-background: 0 0% 6%;
+    --sidebar-foreground: 0 0% 96%;
+    --sidebar-primary: 47 92% 53%;
+    --sidebar-primary-foreground: 0 0% 5%;
+    --sidebar-accent: 0 0% 14%;
+    --sidebar-accent-foreground: 0 0% 96%;
+    --sidebar-border: 0 0% 16%;
+    --sidebar-ring: 47 92% 53%;
+
+    --gradient-primary: linear-gradient(135deg, hsl(47 92% 58%) 0%, hsl(16 88% 58%) 100%);
+    --gradient-hero: linear-gradient(135deg, hsl(0 0% 4%) 0%, hsl(0 0% 9%) 55%, hsl(16 40% 12%) 100%);
+    --gradient-card: linear-gradient(180deg, hsl(0 0% 9%) 0%, hsl(0 0% 6%) 100%);
+
+    --shadow-glow: 0 0 40px hsl(47 92% 58% / 0.3);
+    --shadow-card: 0 4px 20px -4px hsl(0 0% 0% / 0.45);
   }
 }
 
@@ -161,6 +145,30 @@
   body {
     @apply bg-background text-foreground antialiased;
   }
+
+  /* Bold geometric display face for headings and big numbers everywhere -
+     every <CardTitle> etc. picks this up automatically, no per-page work */
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+  }
+}
+
+@layer utilities {
+  /* Oversized numeral treatment for key stats (balances, Sharpe, ATE) -
+     tabular-nums keeps digits aligned when a value updates */
+  .stat-number {
+    font-family: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+  }
+
+  /* Short-label brand treatment: nav items, section labels, chart legends -
+     never for body copy or table content */
+  .label-brand {
+    font-family: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
 }
 
 @layer components {
@@ -168,37 +176,37 @@
   .glass {
     @apply bg-card/80 backdrop-blur-md border border-border/50;
   }
-  
-  /* Gradient text */
+
+  /* Gradient text - yellow to orange brand sweep */
   .gradient-text {
     @apply bg-clip-text text-transparent;
     background-image: var(--gradient-primary);
   }
-  
+
   /* Hover lift effect */
   .hover-lift {
     @apply transition-all duration-300 ease-out;
   }
-  
+
   .hover-lift:hover {
     @apply -translate-y-1;
     box-shadow: var(--shadow-lg);
   }
-  
-  /* Glow effect */
+
+  /* Glow effect - brand yellow */
   .glow {
     box-shadow: var(--shadow-glow);
   }
-  
+
   /* Feature card styling */
   .feature-card {
-    @apply bg-card rounded-xl p-6 border border-border/50 hover-lift;
+    @apply bg-card rounded-2xl p-6 border border-border/50 hover-lift;
     box-shadow: var(--shadow-card);
   }
-  
+
   /* Metric card styling */
   .metric-card {
-    @apply bg-card rounded-lg p-4 border border-border/30;
+    @apply bg-card rounded-xl p-4 border border-border/30;
     box-shadow: var(--shadow-sm);
   }
 }

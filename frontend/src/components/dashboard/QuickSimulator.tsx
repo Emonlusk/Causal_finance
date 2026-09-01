@@ -49,7 +49,7 @@ export function QuickSimulator() {
           <div>
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm text-muted-foreground">If rates increase by:</span>
-              <span className="font-bold text-primary">+{rateChange.toFixed(1)}%</span>
+              <span className="stat-number font-bold text-primary">+{rateChange.toFixed(1)}%</span>
             </div>
             <input
               type="range"
@@ -63,17 +63,17 @@ export function QuickSimulator() {
                 [&::-webkit-slider-thumb]:w-4
                 [&::-webkit-slider-thumb]:h-4
                 [&::-webkit-slider-thumb]:rounded-full
-                [&::-webkit-slider-thumb]:bg-primary
+                [&::-webkit-slider-thumb]:bg-accent
                 [&::-webkit-slider-thumb]:cursor-pointer"
             />
           </div>
 
-          <div className="p-3 bg-secondary rounded-lg">
+          <div className="p-3 bg-muted rounded-lg">
             <div className="text-sm text-muted-foreground mb-1">Your portfolio:</div>
             {isLoading ? (
               <Skeleton className="h-8 w-24" />
             ) : (
-              <div className={`text-2xl font-bold ${portfolioImpact < 0 ? "text-destructive" : "text-success"}`}>
+              <div className={`stat-number text-2xl font-bold ${portfolioImpact < 0 ? "text-destructive" : "text-success"}`}>
                 {portfolioImpact > 0 ? '+' : ''}{portfolioImpact.toFixed(1)}% projected
               </div>
             )}

@@ -18,7 +18,7 @@ const activityColors: Record<string, string> = {
   portfolio_rebalance: "text-primary",
   causal_analysis: "text-accent",
   model_update: "text-success",
-  scenario_run: "text-blue-500",
+  scenario_run: "text-secondary",
   portfolio_created: "text-primary",
   economic_alert: "text-warning",
   market_alert: "text-destructive",
@@ -79,7 +79,7 @@ export function ActivityFeed() {
               
               return (
                 <div key={activity.id} className="flex items-start gap-3">
-                  <div className={`p-2 rounded-lg bg-secondary ${color}`}>
+                  <div className={`p-2 rounded-lg bg-muted ${color}`}>
                     <Icon className="w-4 h-4" />
                   </div>
                   <div className="flex-1 min-w-0">

@@ -490,17 +490,17 @@ const PortfolioBuilder = () => {
                 </div>
                 <div className="flex items-center gap-6">
                   <div className="text-center">
-                    <div className={`text-2xl font-bold ${(backtestResults.backtest.total_return || 0) >= 0 ? 'text-success' : 'text-destructive'}`}>
+                    <div className={`stat-number text-2xl font-bold ${(backtestResults.backtest.total_return || 0) >= 0 ? 'text-success' : 'text-destructive'}`}>
                       {((backtestResults.backtest.total_return || 0) * 100).toFixed(1)}%
                     </div>
                     <div className="text-xs text-muted-foreground">Total Return</div>
                   </div>
                   <div className="text-center">
-                    <div className="text-2xl font-bold">{((backtestResults.backtest.volatility || 0) * 100).toFixed(1)}%</div>
+                    <div className="stat-number text-2xl font-bold">{((backtestResults.backtest.volatility || 0) * 100).toFixed(1)}%</div>
                     <div className="text-xs text-muted-foreground">Volatility</div>
                   </div>
                   <div className="text-center">
-                    <div className="text-2xl font-bold">{(backtestResults.backtest.sharpe_ratio || 0).toFixed(2)}</div>
+                    <div className="stat-number text-2xl font-bold">{(backtestResults.backtest.sharpe_ratio || 0).toFixed(2)}</div>
                     <div className="text-xs text-muted-foreground">Sharpe Ratio</div>
                   </div>
                 </div>
@@ -558,21 +558,21 @@ const PortfolioBuilder = () => {
 
               {/* Metrics */}
               <div className="grid grid-cols-2 gap-3">
-                <div className="p-3 bg-secondary rounded-lg">
-                  <div className="text-xs text-muted-foreground">Expected Return</div>
-                  <div className="text-xl font-bold">{traditionalMetrics.expectedReturn}%</div>
+                <div className="p-3 bg-muted rounded-lg">
+                  <div className="label-brand text-[10px] text-muted-foreground">Expected Return</div>
+                  <div className="stat-number text-xl font-bold">{traditionalMetrics.expectedReturn}%</div>
                 </div>
-                <div className="p-3 bg-secondary rounded-lg">
-                  <div className="text-xs text-muted-foreground">Volatility</div>
-                  <div className="text-xl font-bold">{traditionalMetrics.volatility}%</div>
+                <div className="p-3 bg-muted rounded-lg">
+                  <div className="label-brand text-[10px] text-muted-foreground">Volatility</div>
+                  <div className="stat-number text-xl font-bold">{traditionalMetrics.volatility}%</div>
                 </div>
-                <div className="p-3 bg-secondary rounded-lg">
-                  <div className="text-xs text-muted-foreground">Sharpe Ratio</div>
-                  <div className="text-xl font-bold">{traditionalMetrics.sharpeRatio}</div>
+                <div className="p-3 bg-muted rounded-lg">
+                  <div className="label-brand text-[10px] text-muted-foreground">Sharpe Ratio</div>
+                  <div className="stat-number text-xl font-bold">{traditionalMetrics.sharpeRatio}</div>
                 </div>
-                <div className="p-3 bg-secondary rounded-lg">
-                  <div className="text-xs text-muted-foreground">Max Drawdown</div>
-                  <div className="text-xl font-bold text-destructive">{traditionalMetrics.maxDrawdown}%</div>
+                <div className="p-3 bg-muted rounded-lg">
+                  <div className="label-brand text-[10px] text-muted-foreground">Max Drawdown</div>
+                  <div className="stat-number text-xl font-bold text-destructive">{traditionalMetrics.maxDrawdown}%</div>
                 </div>
               </div>
             </CardContent>
@@ -673,7 +673,7 @@ const PortfolioBuilder = () => {
             <CardContent>
               <div className="grid md:grid-cols-2 gap-4">
                 {causalReasons.map((reason, index) => (
-                  <div key={index} className="p-4 bg-secondary/50 rounded-lg">
+                  <div key={index} className="p-4 bg-muted/50 rounded-lg">
                     <div className="flex items-center justify-between mb-2">
                       <span className="font-medium">{reason.factor}</span>
                       <Badge variant="outline">{reason.confidence}% conf.</Badge>

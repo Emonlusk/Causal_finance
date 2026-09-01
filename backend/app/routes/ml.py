@@ -11,6 +11,7 @@ Provides:
 """
 
 from flask import Blueprint, jsonify, request, current_app
+from flask_jwt_extended import jwt_required
 from datetime import datetime
 import logging
 import os
@@ -19,11 +20,10 @@ import uuid
 
 # Import ML services
 from ..services.ml_training_pipeline import (
-    MLTrainingPipeline, 
-    PredictionService, 
+    MLTrainingPipeline,
+    PredictionService,
     ModelRegistry,
     get_training_pipeline,
-    get_prediction_service
 )
 from ..services.data_pipeline import DataPipeline
 from ..services.causal_discovery import CausalDiscoveryEngine
@@ -46,6 +46,7 @@ _training_jobs = {}
 # ============================================
 
 @ml_bp.route('/train', methods=['POST'])
+@jwt_required()
 def start_training():
     """
     Start model training pipeline asynchronously in a background thread.
@@ -166,6 +167,7 @@ def get_training_status(pipeline_id=None):
 # ============================================
 
 @ml_bp.route('/data/fetch', methods=['POST'])
+@jwt_required()
 def fetch_data():
     """
     Fetch market and macro data.
@@ -583,106 +585,38 @@ def get_causal_dag():
 @ml_bp.route('/causal/sensitivity-matrix', methods=['GET'])
 def get_sensitivity_matrix():
     """
-    Get the learned sensitivity matrix (macro -> sector effects).
+    Get the sector sensitivity matrix (macro factor -> sector effects).
+
+    Sourced from causal_service.get_active_sensitivity_matrix() - the trained
+    ML model when available, otherwise causal_service.DEFAULT_SECTOR_SENSITIVITY.
+    That is the only hardcoded fallback matrix in the codebase; every other
+    consumer (causal.py, scenario_service.py, portfolio_service.py) goes
+    through the same function, so don't reintroduce a local one here.
+
+    causal_service returns {sector: {factor: value}}; this endpoint has
+    always responded with {factor: {sector: value}} (that's the shape
+    PaperTrading.tsx's sensitivity widget renders), so the matrix is
+    transposed before responding.
     """
     try:
-        service = get_prediction_service()
-        matrix = service.get_sensitivity_matrix()
-        
-        if matrix:
-            return jsonify({
-                'success': True,
-                'sensitivity_matrix': matrix,
-                'matrix': matrix  # Also at 'matrix' for frontend compatibility
-            })
-        
-        # Fallback to computing on the fly
-        feature_path = os.path.join(DATA_DIR, 'processed', 'feature_matrix.parquet')
-        
-        if not os.path.exists(feature_path):
-            # Return demo sensitivity matrix
-            demo_matrix = {
-                'Fed_Funds_Rate': {
-                    'Technology': -0.015,
-                    'Financials': 0.012,
-                    'Healthcare': -0.005,
-                    'Energy': 0.003,
-                    'Consumer Staples': -0.008,
-                    'Consumer Discretionary': -0.018,
-                    'Industrials': -0.010,
-                    'Utilities': -0.020,
-                    'Real Estate': -0.025,
-                    'Materials': -0.007,
-                },
-                'CPI_Change': {
-                    'Technology': -0.008,
-                    'Financials': 0.005,
-                    'Healthcare': 0.002,
-                    'Energy': 0.025,
-                    'Consumer Staples': -0.003,
-                    'Consumer Discretionary': -0.012,
-                    'Industrials': -0.006,
-                    'Utilities': 0.008,
-                    'Real Estate': -0.010,
-                    'Materials': 0.015,
-                },
-                'GDP_Growth': {
-                    'Technology': 0.020,
-                    'Financials': 0.018,
-                    'Healthcare': 0.008,
-                    'Energy': 0.022,
-                    'Consumer Staples': 0.005,
-                    'Consumer Discretionary': 0.028,
-                    'Industrials': 0.025,
-                    'Utilities': 0.003,
-                    'Real Estate': 0.015,
-                    'Materials': 0.020,
-                },
-                'VIX': {
-                    'Technology': -0.035,
-                    'Financials': -0.025,
-                    'Healthcare': -0.015,
-                    'Energy': -0.020,
-                    'Consumer Staples': -0.008,
-                    'Consumer Discretionary': -0.030,
-                    'Industrials': -0.022,
-                    'Utilities': -0.010,
-                    'Real Estate': -0.025,
-                    'Materials': -0.018,
-                },
-            }
-            return jsonify({
-                'success': True,
-                'sensitivity_matrix': demo_matrix,
-                'matrix': demo_matrix,
-                'demo_mode': True,
-                'message': 'Using demo sensitivity matrix. Train ML models for real causal analysis.'
-            })
-        
-        features = pd.read_parquet(feature_path)
-        
-        from ..services.treatment_effects import TreatmentEffectEstimator
-        
-        macro_cols = ['Fed_Funds_Rate', 'CPI_Change', 'GDP_Change']
-        sector_cols = [c for c in features.columns if c.endswith('_Return_1d')]
-        
-        available_macro = [c for c in macro_cols if c in features.columns]
-        sector_names = [c.replace('_Return_1d', '') for c in sector_cols]
-        
-        estimator = TreatmentEffectEstimator()
-        # First compute effects, then build sensitivity matrix from them
-        macro_treatments = [f'{m}_Change' if not m.endswith('_Change') else m for m in available_macro]
-        effects = estimator.estimate_macro_sector_effects(
-            features, sectors=sector_names, macro_treatments=macro_treatments
-        )
-        matrix = estimator.build_sensitivity_matrix(effects)
-        
+        from ..services.causal_service import get_active_sensitivity_matrix, _get_trained_sensitivity_matrix
+
+        sector_matrix = get_active_sensitivity_matrix()
+        is_ml_trained = _get_trained_sensitivity_matrix() is not None
+
+        factor_matrix: dict = {}
+        for sector, factors in sector_matrix.items():
+            for factor, value in factors.items():
+                factor_matrix.setdefault(factor, {})[sector] = value
+
         return jsonify({
             'success': True,
-            'sensitivity_matrix': matrix,
-            'matrix': matrix  # Also at 'matrix' for frontend compatibility
+            'sensitivity_matrix': factor_matrix,
+            'matrix': factor_matrix,  # Also at 'matrix' for frontend compatibility
+            'is_ml_trained': is_ml_trained,
+            'source': 'ML Model' if is_ml_trained else 'Default Coefficients'
         })
-        
+
     except Exception as e:
         logger.error(f"Sensitivity matrix failed: {e}")
         return jsonify({
@@ -750,6 +684,7 @@ def get_active_model(model_type):
 
 
 @ml_bp.route('/models/<model_type>/<model_id>/activate', methods=['POST'])
+@jwt_required()
 def activate_model(model_type, model_id):
     """
     Set a model as active.

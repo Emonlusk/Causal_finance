@@ -42,35 +42,23 @@ export function PerformanceChart() {
   const chartData = useMemo(() => {
     const benchmarkTimeSeries = benchmarkData?.data?.time_series || [];
     const portfolioTimeSeries = portfolioPerf?.performance?.time_series || [];
-    
+
     if (benchmarkTimeSeries.length === 0) {
-      // Generate fallback data if API not available
-      const data = [];
-      let portfolio = 100;
-      let sp500 = 100;
-
-      const monthCount = selectedTimeframe === '1M' ? 4 : selectedTimeframe === '3M' ? 12 : 12;
-      for (let i = 0; i < monthCount; i++) {
-        const date = new Date();
-        date.setMonth(date.getMonth() - (monthCount - 1 - i));
-        const month = date.toLocaleString("default", { month: "short" });
-
-        portfolio += (Math.random() - 0.3) * 8;
-        sp500 += (Math.random() - 0.35) * 6;
-
-        data.push({
-          month,
-          portfolio: Math.round(portfolio * 10) / 10,
-          sp500: Math.round(sp500 * 10) / 10,
-        });
-      }
-      return data;
+      // No real benchmark data at all - don't fabricate a series. The empty
+      // state below tells the user there isn't enough data yet instead.
+      return [];
     }
 
     // Merge benchmark and portfolio data. Both are indexed to start at 100
     // so they're comparable on the same scale: the benchmark from its raw
     // close price, the portfolio from its already-cumulative % return.
     const benchmarkBase = benchmarkTimeSeries[0]?.close || 1;
+
+    // Carry the last known portfolio value forward for dates where the
+    // portfolio has no matching data point, instead of fabricating motion.
+    // Starts at the same 100 baseline as the benchmark until real data
+    // arrives.
+    let lastKnownPortfolioValue = 100;
 
     return benchmarkTimeSeries.map((point, index) => {
       const date = new Date(point.date);
@@ -80,7 +68,8 @@ export function PerformanceChart() {
       const portfolioPoint = portfolioTimeSeries[index];
       const portfolioValue = portfolioPoint
         ? 100 + portfolioPoint.return
-        : sp500Value + (Math.random() - 0.5) * 5; // Simulated if no portfolio data for this date
+        : lastKnownPortfolioValue;
+      lastKnownPortfolioValue = portfolioValue;
 
       return {
         month,
@@ -110,7 +99,7 @@ export function PerformanceChart() {
             {isUsingFallbackData ? (
               <>
                 <Info className="w-3 h-3" />
-                Simulated data for demonstration
+                Not enough market data yet
               </>
             ) : (
               <>
@@ -159,6 +148,13 @@ export function PerformanceChart() {
               <Skeleton className="h-4 w-3/4" />
               <Skeleton className="h-48 w-full" />
               <Skeleton className="h-4 w-1/2 mx-auto" />
+            </div>
+          ) : chartData.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full gap-2 text-center">
+              <Info className="w-6 h-6 text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">
+                Not enough market data yet to show a performance comparison.
+              </p>
             </div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">

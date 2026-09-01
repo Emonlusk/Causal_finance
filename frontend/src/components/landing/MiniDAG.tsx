@@ -37,7 +37,7 @@ export function MiniDAG() {
               y1={from.y}
               x2={to.x}
               y2={to.y}
-              stroke={hovered ? "hsl(var(--primary))" : "hsl(var(--border))"}
+              stroke={hovered ? "hsl(var(--accent))" : "hsl(var(--border))"}
               strokeWidth="2"
               className="transition-all duration-300"
             />
@@ -51,7 +51,7 @@ export function MiniDAG() {
               cx={node.x}
               cy={node.y}
               r={hovered ? 10 : 8}
-              fill={hovered ? "hsl(var(--primary))" : "hsl(var(--muted))"}
+              fill={hovered ? "hsl(var(--accent))" : "hsl(var(--muted))"}
               className="transition-all duration-300"
             />
             <text
@@ -59,7 +59,7 @@ export function MiniDAG() {
               y={node.y}
               textAnchor="middle"
               dominantBaseline="central"
-              fill={hovered ? "hsl(var(--primary-foreground))" : "hsl(var(--muted-foreground))"}
+              fill={hovered ? "hsl(var(--accent-foreground))" : "hsl(var(--muted-foreground))"}
               fontSize="8"
               fontWeight="600"
               className="transition-all duration-300"

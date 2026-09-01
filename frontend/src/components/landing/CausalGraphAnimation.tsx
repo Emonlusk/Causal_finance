@@ -39,16 +39,21 @@ const getNodePosition = (nodeId: string) => {
   return node ? { x: node.x, y: node.y } : { x: 0, y: 0 };
 };
 
+// This animation sits on the hero's fixed near-black background
+// (--gradient-hero, identical in light/dark mode), so node colors are drawn
+// from the theme-invariant accent/secondary/sidebar tokens rather than
+// --primary (which deliberately flips dark/light for button contrast and
+// would render near-invisible on a permanently dark hero).
 const getNodeColor = (type: Node["type"]) => {
   switch (type) {
     case "economic":
-      return "hsl(var(--primary))";
-    case "asset":
       return "hsl(var(--accent))";
+    case "asset":
+      return "hsl(var(--secondary))";
     case "outcome":
-      return "hsl(var(--primary))";
+      return "hsl(var(--sidebar-foreground))";
     default:
-      return "hsl(var(--muted))";
+      return "hsl(var(--sidebar-foreground))";
   }
 };
 
@@ -107,8 +112,8 @@ export function CausalGraphAnimation() {
       >
         <defs>
           <linearGradient id="edgeGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor="hsl(var(--primary-foreground))" stopOpacity="0.6" />
-            <stop offset="100%" stopColor="hsl(var(--primary-foreground))" stopOpacity="0.2" />
+            <stop offset="0%" stopColor="hsl(var(--sidebar-foreground))" stopOpacity="0.6" />
+            <stop offset="100%" stopColor="hsl(var(--sidebar-foreground))" stopOpacity="0.2" />
           </linearGradient>
         </defs>
 

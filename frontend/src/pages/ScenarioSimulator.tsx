@@ -485,7 +485,7 @@ const ScenarioSimulator = () => {
                       {m.label}
                       {m.fromApi && <span className="ml-1 text-green-500">●</span>}
                     </div>
-                    <div className={`text-2xl font-bold ${m.value < 0 ? "text-destructive" : "text-success"}`}>
+                    <div className={`stat-number text-2xl font-bold ${m.value < 0 ? "text-destructive" : "text-success"}`}>
                       {m.value > 0 ? "+" : ""}{typeof m.value === 'number' ? m.value.toFixed(1) : m.value}%
                     </div>
                     {m.highlight && <Badge className="mt-2 bg-accent">Best</Badge>}
@@ -533,7 +533,7 @@ const ScenarioSimulator = () => {
                       }
                     }
                     return displayRecs.map((r: any, i: number) => (
-                    <div key={i} className="flex items-center gap-3 p-3 bg-secondary/50 rounded-lg">
+                    <div key={i} className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg">
                       <Badge variant={r.type === "immediate" || r.priority === "high" ? "default" : "secondary"}>
                         {r.type || r.priority || "strategic"}
                       </Badge>

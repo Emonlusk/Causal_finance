@@ -1,4 +1,4 @@
-Split,Test_Start,train_start,annualized_return,sharpe_ratio,sortino_ratio,max_drawdown
-Early (-6m),2020-11-01,2018-06-20,10.9087,0.4463,0.4415,-20.101
-Baseline,2021-05-01,2018-06-20,5.1163,0.0646,0.0638,-24.9562
-Late (+6m),2021-11-01,2018-10-30,1.3742,-0.1176,-0.1179,-31.3867
+Split,Test_Start,train_start,n_folds,annualized_return,sharpe_ratio,sortino_ratio,max_drawdown
+Early (-6m),2020-11-01,2018-06-20,10,1.5384,-0.1432,-0.1408,-25.904
+Baseline,2021-05-01,2018-06-20,10,1.5384,-0.1432,-0.1408,-25.904
+Late (+6m),2021-11-01,2018-10-30,8,-3.3975,-0.4076,-0.4074,-23.2798

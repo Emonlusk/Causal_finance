@@ -270,12 +270,26 @@ class CausalDiscoveryEngine:
             
             logger.info(f"Running PC algorithm on {len(variables)} variables with {len(analysis_data)} samples")
             
-            # Run PC algorithm
+            # Run PC algorithm. ci_test defaults to 'chi_square' in pgmpy,
+            # which assumes discrete/categorical variables and builds a
+            # contingency table per test - on continuous return series (each
+            # row effectively its own category) that's both statistically
+            # wrong and combinatorially slow (multi-minute runs observed on
+            # 11 variables). 'pearsonr' (partial correlation) is the
+            # standard conditional-independence test for continuous data and
+            # is what this algorithm should have been using all along.
+            # max_cond_vars bounds worst-case runtime as variable count
+            # grows; 3 is enough to catch real confounding among ~10-15
+            # macro/sector variables without the combinatorial blowup of
+            # pgmpy's default of 5.
             pc = PC(analysis_data)
             model = pc.estimate(
                 variant='stable',
+                ci_test='pearsonr',
+                max_cond_vars=3,
                 significance_level=self.significance_level,
-                return_type='dag'
+                return_type='dag',
+                show_progress=False,
             )
             
             # Extract edges

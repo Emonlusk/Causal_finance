@@ -373,23 +373,23 @@ const PaperTrading = () => {
 
         {/* Account Summary Cards */}
         <div className="grid gap-4 md:grid-cols-4">
-          <Card className="bg-gradient-to-br from-blue-500/10 to-blue-600/5 border-blue-500/20">
+          <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Cash Balance</CardTitle>
-              <Wallet className="h-4 w-4 text-blue-500" />
+              <Wallet className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
               {loadingBalance ? (
                 <Skeleton className="h-8 w-24" />
               ) : (
-                <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                <div className="stat-number text-2xl font-bold">
                   ${cashBalance.toLocaleString("en-US", { minimumFractionDigits: 2 })}
                 </div>
               )}
               <div className="flex gap-2 mt-3">
                 <Dialog open={depositDialogOpen} onOpenChange={setDepositDialogOpen}>
                   <DialogTrigger asChild>
-                    <Button size="sm" className="flex-1 bg-blue-600 hover:bg-blue-700">
+                    <Button size="sm" className="flex-1">
                       <Plus className="w-3 h-3 mr-1" /> Deposit
                     </Button>
                   </DialogTrigger>
@@ -477,7 +477,7 @@ const PaperTrading = () => {
               <TrendingUp className="h-4 w-4 text-green-500" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">
+              <div className="stat-number text-2xl font-bold">
                 ${totalValue.toLocaleString("en-US", { minimumFractionDigits: 2 })}
               </div>
               <p className="text-xs text-muted-foreground mt-1">
@@ -492,7 +492,7 @@ const PaperTrading = () => {
               <DollarSign className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">
+              <div className="stat-number text-2xl font-bold">
                 ${portfolioCash.toLocaleString("en-US", { minimumFractionDigits: 2 })}
               </div>
               <p className="text-xs text-muted-foreground mt-1">
@@ -501,13 +501,13 @@ const PaperTrading = () => {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="border-accent/40 bg-accent/5">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Total Equity</CardTitle>
-              <DollarSign className="h-4 w-4 text-primary" />
+              <DollarSign className="h-4 w-4 text-secondary" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-primary">
+              <div className="stat-number text-2xl font-bold">
                 ${totalEquity.toLocaleString("en-US", { minimumFractionDigits: 2 })}
               </div>
               <p className="text-xs text-muted-foreground mt-1">
@@ -1051,12 +1051,12 @@ const PaperTrading = () => {
         {/* ML Predictions & Causal Insights Section */}
         <div className="grid gap-6 lg:grid-cols-2">
           {/* Left: ML Predictions */}
-          <Card className="bg-gradient-to-br from-purple-500/5 to-indigo-500/5 border-purple-500/20">
+          <Card className="border-accent/40 bg-accent/5">
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
-                <Brain className="w-4 h-4 text-purple-500" />
+                <Brain className="w-4 h-4 text-secondary" />
                 ML Stock Predictions
-                <Badge variant="outline" className="ml-auto text-purple-500 border-purple-500/30">
+                <Badge variant="accent" className="ml-auto">
                   AI-Powered
                 </Badge>
               </CardTitle>
@@ -1096,7 +1096,7 @@ const PaperTrading = () => {
               <div className="p-4 rounded-lg bg-background/50 border">
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2">
-                    <LineChart className="w-4 h-4 text-blue-500" />
+                    <LineChart className="w-4 h-4 text-secondary" />
                     <span className="font-medium text-sm">5-Day Return Forecast</span>
                   </div>
                   {sectorPrediction.isPending && <Loader2 className="w-4 h-4 animate-spin" />}
@@ -1180,12 +1180,12 @@ const PaperTrading = () => {
           </Card>
 
           {/* Right: Market Regime & Causal Insights */}
-          <Card className="bg-gradient-to-br from-cyan-500/5 to-blue-500/5 border-cyan-500/20">
+          <Card className="border-accent/40 bg-accent/5">
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
-                <Target className="w-4 h-4 text-cyan-500" />
+                <Target className="w-4 h-4 text-secondary" />
                 Market Regime & Causal Insights
-                <Badge variant="outline" className="ml-auto text-cyan-500 border-cyan-500/30">
+                <Badge variant="accent" className="ml-auto">
                   Causal AI
                 </Badge>
               </CardTitle>
@@ -1244,7 +1244,7 @@ const PaperTrading = () => {
                             {displayRegime}
                           </Badge>
                         </div>
-                        <p className="text-2xl font-bold">
+                        <p className="stat-number text-2xl font-bold">
                           {displayRegime}
                         </p>
                         <p className="text-sm text-muted-foreground mt-2">
@@ -1320,7 +1320,7 @@ const PaperTrading = () => {
                               <div className={`p-2 rounded ${
                                 tilt === 'overweight' ? 'bg-green-500/10 text-green-500' :
                                 tilt === 'underweight' ? 'bg-red-500/10 text-red-500' :
-                                'bg-blue-500/10 text-blue-500'
+                                'bg-muted text-muted-foreground'
                               }`}>
                                 {tilt === 'overweight' ? <TrendingUp className="w-4 h-4" /> :
                                  tilt === 'underweight' ? <TrendingDown className="w-4 h-4" /> :

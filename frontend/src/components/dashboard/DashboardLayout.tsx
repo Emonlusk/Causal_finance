@@ -134,7 +134,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                 <line x1="9" y1="12" x2="15" y2="17" stroke="currentColor" strokeWidth="2" />
               </svg>
             </div>
-            {!collapsed && <span className="font-bold text-lg">CausalAI</span>}
+            {!collapsed && <span className="font-heading font-bold text-lg tracking-tight">CausalAI</span>}
           </Link>
         </div>
 
@@ -165,7 +165,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
             {/* Portfolio Value */}
             <div className="mt-3 pt-3 border-t border-sidebar-border">
               <div className="text-xs text-sidebar-foreground/60">Total Balance</div>
-              <div className="text-xl font-bold">
+              <div className="stat-number text-xl font-bold">
                 ${portfolioStats.totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
               <div className="text-xs text-sidebar-foreground/60 mt-1">
@@ -192,7 +192,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                     )}
                   >
                     <item.icon className="w-5 h-5 flex-shrink-0" />
-                    {!collapsed && <span className="text-sm font-medium">{item.label}</span>}
+                    {!collapsed && <span className="label-brand text-xs font-semibold">{item.label}</span>}
                   </Link>
                 </li>
               );

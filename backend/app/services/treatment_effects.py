@@ -878,3 +878,180 @@ def get_treatment_effect_estimator() -> TreatmentEffectEstimator:
     if _estimator is None:
         _estimator = TreatmentEffectEstimator()
     return _estimator
+
+
+# ============================================
+# BACKTEST-ONLY: POINT-IN-TIME SENSITIVITY MATRIX
+# ============================================
+# Used ONLY by portfolio_service.run_walk_forward_backtest (when as_of_date
+# is given) to fix the look-ahead bias where the walk-forward backtest was
+# applying one globally-fit treatment-effects model (trained on data through
+# ~2023-03, via the live training pipeline's 80/20-by-row-count split) across
+# every fold, including folds testing on 2021-2022 - i.e. using information
+# from the future relative to those folds' simulated "as of" dates.
+#
+# This does NOT touch causal_service.get_active_sensitivity_matrix() or any
+# live route - those are untouched and keep serving the latest
+# globally-trained model to real users, unchanged. This function refits the
+# same DML methodology (TreatmentEffectEstimator, same two confounders) but
+# restricted to only the data a fold could actually have seen.
+
+import pickle as _pickle
+
+_BACKTEST_FOLD_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    'data', 'models', 'backtest_folds'
+)
+
+# Must match ml_training_pipeline.PredictionService.TREATMENT_TO_FACTOR.
+# Duplicated (not imported) so this backtest-only path stays fully decoupled
+# from the live model-loading module - editing one never silently affects
+# the other.
+_BACKTEST_TREATMENT_TO_FACTOR = {
+    'Fed_Funds_Rate_Change': 'interest_rates',
+    'CPI_Change': 'inflation',
+    'GDP_Change': 'gdp_growth',
+    'Unemployment_Rate_Change': 'unemployment',
+    'VIX_Change': 'vix',
+    'Oil_WTI_Change': 'oil_price',
+    'Treasury_10Y_Yield_Change': 'treasury_10y',
+}
+
+_BACKTEST_ALL_SECTORS = [
+    'Technology', 'Healthcare', 'Energy', 'Financials', 'Industrials',
+    'Consumer_Discretionary', 'Consumer_Staples', 'Utilities', 'Materials',
+    'Real_Estate', 'Communication_Services',
+]
+
+_backtest_feature_matrix_cache: Optional[pd.DataFrame] = None
+
+
+def _load_backtest_feature_matrix() -> pd.DataFrame:
+    """Load feature_matrix.parquet once per process and cache it - many
+    folds across many backtest scripts otherwise re-read the same file."""
+    global _backtest_feature_matrix_cache
+    if _backtest_feature_matrix_cache is None:
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        path = os.path.join(base_dir, 'data', 'processed', 'feature_matrix.parquet')
+        _backtest_feature_matrix_cache = pd.read_parquet(path)
+    return _backtest_feature_matrix_cache
+
+
+def _sensitivity_dataframe_to_dict(sm: pd.DataFrame) -> Dict[str, Dict[str, float]]:
+    """Same conversion PredictionService.get_sensitivity_matrix() applies to
+    the live model: scale each factor column so its largest |effect| is 0.8
+    (keeps units comparable to the live/default matrix so the 30/70 blend in
+    portfolio_service behaves the same way), lowercase sector keys."""
+    out: Dict[str, Dict[str, float]] = {}
+    for col in sm.columns:
+        factor = _BACKTEST_TREATMENT_TO_FACTOR.get(str(col))
+        if not factor:
+            continue
+        col_vals = sm[col].astype(float)
+        max_abs = float(col_vals.abs().max())
+        scale = (0.8 / max_abs) if max_abs > 0 else 0.0
+        for sector, v in col_vals.items():
+            key = str(sector).lower()
+            out.setdefault(key, {})[factor] = round(float(v) * scale, 3)
+    return out
+
+
+def get_sensitivity_matrix_as_of(
+    train_end: str,
+    train_window_days: int = 756,
+    method: str = 'dml',
+    force_refit: bool = False,
+) -> Optional[Dict[str, Dict[str, float]]]:
+    """
+    Point-in-time sensitivity matrix for backtesting ONLY. Refits the
+    treatment-effects model (same DML methodology and confounders as
+    treatment_effects.py's live training path) using only feature_matrix
+    rows in the same 756-trading-day rolling window
+    run_walk_forward_backtest already uses for the Markowitz layer -
+    i.e. strictly data available as of train_end, never later.
+
+    NOT used by the live app - causal_service.get_active_sensitivity_matrix()
+    is untouched and unaffected by this function's existence.
+
+    Caches each fold's fit to backend/data/models/backtest_folds/, clearly
+    separate from backend/data/models/ (the live-serving model directory),
+    so repeated backtest runs (phase3-6) don't refit the same fold twice.
+
+    Returns the same shape as get_active_sensitivity_matrix()
+    ({sector_key: {factor: sensitivity}}) for drop-in use in
+    portfolio_service, or None on failure. DML fallback/instability isn't
+    encoded in the return value - it's logged loudly (see "DML fallback
+    rate" warnings/errors) so an unstable fit is visible in the run's
+    output rather than silently degrading.
+    """
+    os.makedirs(_BACKTEST_FOLD_DIR, exist_ok=True)
+    cache_path = os.path.join(_BACKTEST_FOLD_DIR, f'sensitivity_{train_end}_{train_window_days}.pkl')
+
+    if not force_refit and os.path.exists(cache_path):
+        try:
+            with open(cache_path, 'rb') as f:
+                return _pickle.load(f)
+        except Exception as e:
+            logger.warning(f"Failed to load cached fold sensitivity matrix {cache_path}: {e}")
+
+    try:
+        feature_matrix = _load_backtest_feature_matrix()
+        windowed = feature_matrix.loc[:pd.Timestamp(train_end)].tail(train_window_days)
+
+        if len(windowed) < train_window_days:
+            logger.warning(
+                f"get_sensitivity_matrix_as_of({train_end}): only {len(windowed)} rows available "
+                f"(wanted {train_window_days}) - proceeding with what's available"
+            )
+        if windowed.empty:
+            logger.error(f"get_sensitivity_matrix_as_of({train_end}): no data available before this date")
+            return None
+
+        sectors = [s for s in _BACKTEST_ALL_SECTORS if f'{s}_Return_1d' in windowed.columns]
+        macro_treatments = [t for t in _BACKTEST_TREATMENT_TO_FACTOR if t in windowed.columns]
+
+        estimator = TreatmentEffectEstimator()
+        effects = estimator.estimate_macro_sector_effects(
+            windowed, sectors=sectors, macro_treatments=macro_treatments, method=method
+        )
+
+        # _estimate_ate_dml silently falls back to OLS internally on any
+        # exception (see _estimate_ate_dml above) - that's existing,
+        # shared behavior we're not changing. But for THIS backtest-only
+        # path we need to know if that happened, not let it pass silently:
+        # a high per-fold fallback rate is itself a finding (evidence DML
+        # doesn't reliably converge on a 756-day window), not something to
+        # paper over.
+        n_requested = 0
+        fallback_methods: List[str] = []
+        for sector_effects in effects.values():
+            for effect in sector_effects.values():
+                n_requested += 1
+                if effect.get('method') != 'double_ml':
+                    fallback_methods.append(str(effect.get('method')))
+
+        if n_requested > 0 and fallback_methods:
+            fallback_rate = len(fallback_methods) / n_requested
+            level = logger.error if fallback_rate > 0.25 else logger.warning
+            level(
+                f"get_sensitivity_matrix_as_of({train_end}): DML fallback rate "
+                f"{fallback_rate:.1%} ({len(fallback_methods)}/{n_requested} pairs fell back to "
+                f"{sorted(set(fallback_methods))} instead of double_ml) on a {len(windowed)}-row "
+                f"window - DML may not be converging reliably at this sample size. NOT silently "
+                f"ignored: check logs above this line for the underlying exception from "
+                f"_estimate_ate_dml."
+            )
+
+        sm_df = estimator.build_sensitivity_matrix(effects)
+        result = _sensitivity_dataframe_to_dict(sm_df)
+
+        try:
+            with open(cache_path, 'wb') as f:
+                _pickle.dump(result, f)
+        except Exception as e:
+            logger.warning(f"Failed to cache fold sensitivity matrix {cache_path}: {e}")
+
+        return result or None
+    except Exception as e:
+        logger.error(f"get_sensitivity_matrix_as_of({train_end}) failed: {e}")
+        return None

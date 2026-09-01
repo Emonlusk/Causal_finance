@@ -1,4 +1,4 @@
 test,comparison,t_statistic,p_value,significance,mean_diff,std_diff,n_observations
-Paired t-test,Causal vs Equal Weight,-0.7187,0.478284,ns,-0.00237,0.017761,29
-Paired t-test,Causal vs Markowitz MPT,1.0044,0.323512,ns,0.000355,0.001936,30
-Paired t-test,Causal vs S&P 500 (SPY),-0.7643,0.451099,ns,-0.002563,0.018061,29
+Paired t-test,Causal vs Equal Weight,-0.9383,0.356095,ns,-0.003075,0.017648,29
+Paired t-test,Causal vs Markowitz MPT,-1.133,0.26651,ns,-0.000357,0.001727,30
+Paired t-test,Causal vs S&P 500 (SPY),-1.0222,0.315415,ns,-0.003268,0.017216,29

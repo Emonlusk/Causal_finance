@@ -1,4 +1,4 @@
 test,comparison,u_statistic,p_value,significance,alternative,n_a,n_b
-Mann-Whitney U,Causal vs Equal Weight,446.0,0.436755,ns,greater,30,29
-Mann-Whitney U,Causal vs Markowitz MPT,455.0,0.473476,ns,greater,30,30
-Mann-Whitney U,Causal vs S&P 500 (SPY),433.0,0.515118,ns,greater,30,29
+Mann-Whitney U,Causal vs Equal Weight,442.0,0.460747,ns,greater,30,29
+Mann-Whitney U,Causal vs Markowitz MPT,442.5,0.547079,ns,greater,30,30
+Mann-Whitney U,Causal vs S&P 500 (SPY),425.0,0.563245,ns,greater,30,29

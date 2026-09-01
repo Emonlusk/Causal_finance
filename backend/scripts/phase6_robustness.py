@@ -7,11 +7,16 @@ Validates that results hold across different conditions:
 3. Transaction cost sensitivity (0, 10, 30, 50 bps)
 4. Train/test split sensitivity (+/-6 months)
 
-Every check derives its own weights from data available as of that check's
-own training cutoff (run_single_period_backtest / run_walk_forward_backtest
-in portfolio_service), rather than reusing one set of weights computed from
-present-day data across every historical window - see phase3_backtesting.py
-for the same fix applied to the headline backtest.
+Every check uses run_walk_forward_backtest from portfolio_service - the SAME
+methodology as the headline Phase 3 number: a rolling 3-year training window,
+re-optimized/rebalanced every 63 trading days, 10bps transaction costs
+charged at each rebalance (see phase3_backtesting.py). No check here holds
+one fixed allocation for years without rebalancing - that was a real bug
+(sub_period_analysis and split_sensitivity used run_single_period_backtest,
+a single train-then-hold-for-years split with zero rebalancing) that made
+those two checks describe a different strategy than the headline number and
+than each other's implied claims. Fixed so every phase6 output is
+apples-to-apples with phase3/phase5.
 
 Usage:
     from scripts.phase6_robustness import run_robustness
@@ -39,9 +44,14 @@ def sub_period_analysis(
     sub_periods: Optional[Dict[str, tuple]] = None
 ) -> pd.DataFrame:
     """
-    Train-then-test independently within each named sub-period, so each
-    period's weights reflect only what was knowable as of that period's own
-    start - not one global weight vector applied retroactively everywhere.
+    Walk-forward backtest (run_walk_forward_backtest - 3yr rolling train
+    window, 63-day test folds, re-optimized/rebalanced every fold, 10bps
+    transaction costs at each rebalance; identical methodology to
+    phase3_backtesting.py's headline number) restricted to each named
+    sub-period's date range via first_test_start/end_date, so each period's
+    metrics describe the same walk-forward re-optimized strategy the
+    headline number does - not a single fixed allocation held for the whole
+    period.
 
     Args:
         assets: Asset universe
@@ -50,7 +60,7 @@ def sub_period_analysis(
     Returns:
         DataFrame with per-period metrics
     """
-    from app.services.portfolio_service import run_single_period_backtest
+    from app.services.portfolio_service import run_walk_forward_backtest
 
     if assets is None:
         assets = DEFAULT_ASSETS
@@ -64,17 +74,19 @@ def sub_period_analysis(
     rows = []
     for period_name, (start, end) in sub_periods.items():
         logger.info(f"Running sub-period backtest: {period_name} ({start} to {end})")
-        result = run_single_period_backtest(assets, start, end, use_causal=True)
+        result = run_walk_forward_backtest(assets, use_causal=True, first_test_start=start, end_date=end)
 
         row = {'Period': period_name, 'Start': start, 'End': end}
-        if 'error' in result:
-            row['error'] = result['error']
-            logger.warning(f"{period_name} skipped: {result['error']}")
+        if 'error' in result or not result.get('fold_results'):
+            row['error'] = result.get('error', 'no folds')
+            logger.warning(f"{period_name} skipped: {row['error']}")
         else:
-            row['train_start'] = result.get('train_start')
+            row['train_start'] = result['fold_results'][0]['train_start']
+            row['n_folds'] = result['n_folds']
+            agg = result['aggregate']
             for key in ['annualized_return', 'sharpe_ratio', 'sortino_ratio',
                         'max_drawdown', 'calmar_ratio', 'var_95_daily', 'cvar_95_daily']:
-                row[key] = result.get(key, None)
+                row[key] = agg.get(key, None)
 
         rows.append(row)
 
@@ -86,8 +98,10 @@ def asset_universe_robustness(
     end_date: str = DEFAULT_TEST_END
 ) -> pd.DataFrame:
     """
-    Test with different asset universes, walk-forward backtested the same
-    way as the headline Phase 3 comparison.
+    Uses run_walk_forward_backtest - same 3yr train / 63-day test /
+    10bps-per-rebalance methodology as the headline Phase 3 comparison. This
+    check already used walk-forward before the sub_period_analysis /
+    split_sensitivity fix above; kept as-is.
 
     Universe 1: Large-cap dominated (5 sectors)
     Universe 2: Full 11-sector
@@ -172,12 +186,16 @@ def split_sensitivity(
     shift_months: int = 6
 ) -> pd.DataFrame:
     """
-    Test sensitivity to train/test split date +/-shift_months. Each split
-    is trained on data ending just before its own (shifted) test_start, so
-    the three splits genuinely use different weights - not the same
-    present-day-derived weights applied to three different start dates.
+    Walk-forward backtest (run_walk_forward_backtest - same 3yr train /
+    63-day test / 10bps-per-rebalance methodology as phase3_backtesting.py
+    and sub_period_analysis above) run from test_start shifted
+    +/-shift_months around base_split through DEFAULT_TEST_END, to test
+    sensitivity to the train/test split date. Each split's first fold trains
+    on data ending just before its own (shifted) test_start, and the
+    strategy is re-optimized every fold thereafter through DEFAULT_TEST_END
+    - not one fixed allocation held for the whole multi-year window.
     """
-    from app.services.portfolio_service import run_single_period_backtest
+    from app.services.portfolio_service import run_walk_forward_backtest
     from datetime import datetime
     from dateutil.relativedelta import relativedelta
 
@@ -196,16 +214,20 @@ def split_sensitivity(
     for split_name, test_start in splits.items():
         logger.info(f"Testing split: {split_name} (test starts {test_start})")
 
-        result = run_single_period_backtest(assets, test_start, DEFAULT_TEST_END, use_causal=True)
+        result = run_walk_forward_backtest(
+            assets, use_causal=True, first_test_start=test_start, end_date=DEFAULT_TEST_END
+        )
 
         row = {'Split': split_name, 'Test_Start': test_start}
-        if 'error' in result:
-            row['error'] = result['error']
-            logger.warning(f"{split_name} skipped: {result['error']}")
+        if 'error' in result or not result.get('fold_results'):
+            row['error'] = result.get('error', 'no folds')
+            logger.warning(f"{split_name} skipped: {row['error']}")
         else:
-            row['train_start'] = result.get('train_start')
+            row['train_start'] = result['fold_results'][0]['train_start']
+            row['n_folds'] = result['n_folds']
+            agg = result['aggregate']
             for key in ['annualized_return', 'sharpe_ratio', 'sortino_ratio', 'max_drawdown']:
-                row[key] = result.get(key, None)
+                row[key] = agg.get(key, None)
         rows.append(row)
 
     return pd.DataFrame(rows)

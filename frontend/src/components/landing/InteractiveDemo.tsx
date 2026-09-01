@@ -1,19 +1,24 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, ArrowDown } from "lucide-react";
 
 export function InteractiveDemo() {
   const [rateChange, setRateChange] = useState(0.5);
-  
-  // Simulated impact calculations
+
+  // Illustrative sector sensitivities (shaped like the platform's real
+  // interest-rate coefficients) showing HOW a causal adjustment propagates
+  // from a macro input to sector-level impact - this is a mechanism demo,
+  // not a claim about historical or live portfolio performance. Actual
+  // backtested performance is reported honestly, with real numbers, in the
+  // Verified Results section below - never fabricate a "live" Sharpe ratio
+  // or confidence score here.
   const techImpact = (-0.8 * rateChange).toFixed(1);
   const healthImpact = (-0.2 * rateChange).toFixed(1);
   const energyImpact = (0.3 * rateChange).toFixed(1);
-  const sharpeRatio = (1.8 - rateChange * 0.2).toFixed(2);
-  const volatility = (14.2 + rateChange * 2).toFixed(1);
 
   return (
-    <section className="py-24 bg-secondary/50">
+    <section id="demo" className="py-24 bg-muted/40 scroll-mt-20">
       <div className="container mx-auto px-6">
         <div className="max-w-5xl mx-auto">
           {/* Header */}
@@ -36,7 +41,7 @@ export function InteractiveDemo() {
                   <span className="text-sm font-medium text-foreground">
                     Interest Rate Change
                   </span>
-                  <span className="text-lg font-bold text-primary">
+                  <span className="stat-number text-sm font-bold px-2.5 py-1 rounded-full bg-accent text-accent-foreground">
                     +{rateChange.toFixed(1)}%
                   </span>
                 </div>
@@ -52,7 +57,7 @@ export function InteractiveDemo() {
                     [&::-webkit-slider-thumb]:w-5
                     [&::-webkit-slider-thumb]:h-5
                     [&::-webkit-slider-thumb]:rounded-full
-                    [&::-webkit-slider-thumb]:bg-primary
+                    [&::-webkit-slider-thumb]:bg-accent
                     [&::-webkit-slider-thumb]:shadow-md
                     [&::-webkit-slider-thumb]:cursor-pointer
                     [&::-webkit-slider-thumb]:transition-transform
@@ -72,16 +77,16 @@ export function InteractiveDemo() {
                     Sector Impact
                   </h4>
                   <div className="space-y-3">
-                    <div className="flex items-center justify-between p-3 bg-secondary/50 rounded-lg">
+                    <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
                       <div className="flex items-center gap-3">
-                        <div className="w-3 h-3 rounded-full bg-primary" />
+                        <div className="w-3 h-3 rounded-full bg-secondary" />
                         <span className="font-medium">Technology</span>
                       </div>
                       <span className={`font-bold ${parseFloat(techImpact) < 0 ? 'text-destructive' : 'text-success'}`}>
                         {techImpact}%
                       </span>
                     </div>
-                    <div className="flex items-center justify-between p-3 bg-secondary/50 rounded-lg">
+                    <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
                       <div className="flex items-center gap-3">
                         <div className="w-3 h-3 rounded-full bg-success" />
                         <span className="font-medium">Healthcare</span>
@@ -90,7 +95,7 @@ export function InteractiveDemo() {
                         {healthImpact}%
                       </span>
                     </div>
-                    <div className="flex items-center justify-between p-3 bg-secondary/50 rounded-lg">
+                    <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
                       <div className="flex items-center gap-3">
                         <div className="w-3 h-3 rounded-full bg-warning" />
                         <span className="font-medium">Energy</span>
@@ -102,38 +107,38 @@ export function InteractiveDemo() {
                   </div>
                 </div>
                 
-                {/* Portfolio Metrics */}
-                <div>
+                {/* Pointer to real, verified numbers - deliberately not a
+                    fabricated "live" portfolio-metrics readout */}
+                <div className="flex flex-col justify-center h-full">
                   <h4 className="text-sm font-medium text-muted-foreground mb-4">
-                    Portfolio Metrics
+                    Does This Actually Work?
                   </h4>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="p-4 bg-secondary/50 rounded-lg text-center">
-                      <div className="text-2xl font-bold text-foreground">{sharpeRatio}</div>
-                      <div className="text-xs text-muted-foreground">Sharpe Ratio</div>
-                    </div>
-                    <div className="p-4 bg-secondary/50 rounded-lg text-center">
-                      <div className="text-2xl font-bold text-foreground">{volatility}%</div>
-                      <div className="text-xs text-muted-foreground">Volatility</div>
-                    </div>
-                    <div className="p-4 bg-secondary/50 rounded-lg text-center col-span-2">
-                      <div className="text-2xl font-bold text-accent">92%</div>
-                      <div className="text-xs text-muted-foreground">Model Confidence</div>
-                    </div>
+                  <div className="p-4 bg-muted/50 rounded-lg border border-border">
+                    <p className="text-sm text-foreground mb-3">
+                      This slider illustrates the mechanism. For what the causal
+                      adjustment actually does to backtested performance - real
+                      numbers, not a demo - see the verified results below.
+                    </p>
+                    <a href="#results" className="inline-flex items-center gap-1.5 text-sm font-medium text-secondary hover:underline">
+                      View verified backtest results
+                      <ArrowDown className="w-3.5 h-3.5" />
+                    </a>
                   </div>
                 </div>
               </div>
             </div>
             
             {/* CTA Footer */}
-            <div className="px-8 py-4 bg-secondary/30 border-t border-border flex items-center justify-between">
+            <div className="px-8 py-4 bg-muted/30 border-t border-border flex items-center justify-between">
               <p className="text-sm text-muted-foreground">
                 This is a simplified demo. Full analysis includes 50+ economic factors.
               </p>
-              <Button variant="ghost" className="text-primary hover:text-primary/80">
-                Try Without Signup
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Button>
+              <Link to="/register">
+                <Button variant="ghost" className="text-foreground hover:bg-accent/10">
+                  Get Started
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
+              </Link>
             </div>
           </div>
         </div>

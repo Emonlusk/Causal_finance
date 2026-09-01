@@ -296,14 +296,30 @@ def _optimize_with_causal(
     Uses ML-trained sensitivity matrix when available.
 
     Args:
-        as_of_date: If given, use market indicators as of this historical
-            date (for backtesting) instead of a live quote, so a fold under
-            test can't see market conditions that hadn't happened yet.
+        as_of_date: If given, this is a backtest fold: (1) market indicators
+            are fetched as of this historical date instead of a live quote,
+            and (2) the sensitivity matrix is refit using only data through
+            this date (get_sensitivity_matrix_as_of) instead of the live
+            app's globally-trained model - a fold under test can't see
+            market conditions, or a causal model fit on data, from after its
+            own train_end. When None (the live app's optimize route), both
+            stay live/current, unchanged.
     """
-    from app.services.causal_service import get_active_sensitivity_matrix
     from app.services.market_service import get_current_indicators, get_indicators_as_of
 
-    active_matrix = get_active_sensitivity_matrix()
+    if as_of_date:
+        from app.services.treatment_effects import get_sensitivity_matrix_as_of
+        active_matrix = get_sensitivity_matrix_as_of(as_of_date)
+        if not active_matrix:
+            # Fold's window had no data / refit failed - fall back to the
+            # module-level defaults (not the live trained model, which
+            # would reintroduce the exact leakage this branch exists to
+            # avoid). Logged loudly inside get_sensitivity_matrix_as_of.
+            from app.services.causal_service import DEFAULT_SECTOR_SENSITIVITY
+            active_matrix = DEFAULT_SECTOR_SENSITIVITY
+    else:
+        from app.services.causal_service import get_active_sensitivity_matrix
+        active_matrix = get_active_sensitivity_matrix()
 
     # Fetch market indicators for causal adjustment: point-in-time for a
     # backtest fold, live for real-time/production use.

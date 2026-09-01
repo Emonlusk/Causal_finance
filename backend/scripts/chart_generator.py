@@ -59,42 +59,50 @@ def plot_cumulative_returns(
         import matplotlib
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
-        import matplotlib.dates as mdates
-        
+
         fig, ax = plt.subplots(figsize=(12, 6))
-        
+
         colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
         plotted = 0
-        
+
+        # Prefer daily_returns (present for all four strategies - walk-forward
+        # results only carry this, not time_series) so every series plots on
+        # the same trading-day-index x-axis, matching plot_drawdown's pattern.
+        # Fall back to time_series (calendar dates) only if daily_returns is
+        # absent.
         for idx, (name, bt) in enumerate(backtest_results.items()):
+            color = colors[idx % len(colors)]
+            daily_returns = bt.get('daily_returns', [])
+            if daily_returns:
+                cumulative = np.cumprod(1 + np.array(daily_returns))
+                ax.plot(range(len(cumulative)), cumulative, label=name, linewidth=1.5, color=color)
+                plotted += 1
+                continue
+
             ts = bt.get('time_series', [])
             if not ts:
                 continue
-            
+
             dates = pd.to_datetime([p['date'] for p in ts])
             values = [p['value'] for p in ts]
-            
-            color = colors[idx % len(colors)]
             ax.plot(dates, values, label=name, linewidth=1.5, color=color)
             plotted += 1
-        
+
         if plotted == 0:
             plt.close()
-            logger.warning("No time_series data available for cumulative returns chart")
+            logger.warning("No return data available for cumulative returns chart")
             return ''
-        
+
         if log_scale:
             ax.set_yscale('log')
             ax.set_ylabel('Cumulative Return (Log Scale)', fontsize=11)
         else:
             ax.set_ylabel('Cumulative Return', fontsize=11)
-        
-        ax.set_xlabel('Date', fontsize=11)
+
+        ax.set_xlabel('Trading Days', fontsize=11)
         ax.set_title(title, fontsize=13, fontweight='bold')
         ax.legend(fontsize=10, loc='upper left')
         ax.grid(True, alpha=0.3)
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
-        plt.xticks(rotation=45)
         plt.tight_layout()
         plt.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white')
         plt.close()
